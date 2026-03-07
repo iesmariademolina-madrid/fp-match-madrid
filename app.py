@@ -441,7 +441,7 @@ m3.metric("Comparación con cortes", "Vía A" if nivel_sim == "Grado Medio" else
 detalle_df = pd.DataFrame(detalle, columns=["Criterio", "Puntos"])
 st.dataframe(detalle_df, use_container_width=True, hide_index=True)
 
-solo_alcanza = st.toggle("Mostrar solo los ciclos que podría hacer", value=False)
+solo_alcanza = st.toggle("Ocultar los ciclos que no alcanza", value=False)
 
 hay_filtro_activo = (
     nivel != "Todos"
@@ -484,10 +484,7 @@ else:
     # Priorizar familias sugeridas en GS
     if nivel_tabla == "Grado Superior" and modalidad_bach is not None:
         sugeridas = sugerencias_por_modalidad(modalidad_bach)
-        if sugeridas:
-            filtered["es_sugerido"] = filtered["familia"].isin(sugeridas)
-        else:
-            filtered["es_sugerido"] = False
+        filtered["es_sugerido"] = filtered["familia"].isin(sugeridas) if sugeridas else False
     else:
         filtered["es_sugerido"] = False
 
@@ -566,9 +563,12 @@ else:
     else:
         display_df = filtered[visible_columns].copy()
 
+        # Mantener siempre visibles las columnas de corte y estado
+        columnas_fijas = ["via_a", "via_a1", "via_a2", "Estado"]
+
         non_empty_cols = []
         for col in display_df.columns:
-            if display_df[col].astype(str).str.strip().ne("").any():
+            if col in columnas_fijas or display_df[col].astype(str).str.strip().ne("").any():
                 non_empty_cols.append(col)
 
         display_df = display_df[non_empty_cols].rename(columns=rename_map)
