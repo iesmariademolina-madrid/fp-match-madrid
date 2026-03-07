@@ -21,6 +21,14 @@ def load_dataset():
         st.error(f"No se encuentra el archivo: {cortes_path}")
         st.stop()
 
+    if ciclos_path.stat().st_size == 0:
+        st.error("ciclos.csv está vacío.")
+        st.stop()
+
+    if cortes_path.stat().st_size == 0:
+        st.error("cortes.csv está vacío.")
+        st.stop()
+
     ciclos = pd.read_csv(ciclos_path)
     cortes = pd.read_csv(cortes_path)
 
@@ -40,7 +48,6 @@ def load_dataset():
             st.error(f"Falta la columna '{col}' en cortes.csv")
             st.stop()
 
-    # Columnas opcionales
     for col in ["modalidad", "turno"]:
         if col not in ciclos.columns:
             ciclos[col] = ""
@@ -116,7 +123,6 @@ def search_cycles(df, query, nivel, familia, municipio, turno_filtro):
     if municipio != "Todos":
         result = result[result["municipio"] == municipio]
 
-    # Crear columna auxiliar de turno agrupado
     result["turno_grupo"] = result["turno"].apply(infer_turno_group)
 
     if turno_filtro != "Ambas":
@@ -125,21 +131,85 @@ def search_cycles(df, query, nivel, familia, municipio, turno_filtro):
     if query.strip():
         q = normalize_scalar(query.strip())
 
+        synonym_map = {
+            "deporte": [
+                "deporte",
+                "deportes",
+                "actividad fisica",
+                "actividades fisicas",
+                "actividades fisicas y deportivas",
+                "acondicionamiento fisico",
+                "sociodeportiva",
+                "guia en el medio natural",
+                "tiempo libre",
+            ],
+            "informatica": [
+                "informatica",
+                "microinformatica",
+                "dam",
+                "daw",
+                "asir",
+                "smr",
+            ],
+            "sanidad": [
+                "sanidad",
+                "cuidados auxiliares de enfermeria",
+                "higiene bucodental",
+                "laboratorio",
+                "diagnostico",
+                "farmacia",
+                "protesis dental",
+            ],
+            "marketing": [
+                "marketing",
+                "comercio",
+                "ventas",
+                "publicidad",
+                "gestion comercial",
+            ],
+        }
+
+        terms = synonym_map.get(q, [q])
+
         ciclo_norm = normalize_text(result["ciclo"])
         familia_norm = normalize_text(result["familia"])
         centro_norm = normalize_text(result["centro"])
         municipio_norm = normalize_text(result["municipio"])
 
-        mask = (
-            ciclo_norm.str.contains(q, na=False)
-            | familia_norm.str.contains(q, na=False)
-            | centro_norm.str.contains(q, na=False)
-            | municipio_norm.str.contains(q, na=False)
-        )
+        mask = pd.Series(False, index=result.index)
+
+        for term in terms:
+            mask = mask | ciclo_norm.str.contains(term, na=False)
+            mask = mask | familia_norm.str.contains(term, na=False)
+            mask = mask | centro_norm.str.contains(term, na=False)
+            mask = mask | municipio_norm.str.contains(term, na=False)
 
         result = result[mask]
 
     return result
+
+
+def calcular_puntuacion_simulada(nivel_sim, via_sim, nota_media, relacionada):
+    """
+    Simulador sencillo y transparente.
+    Está pensado como estimación visual para el alumno.
+    """
+    base = float(nota_media)
+
+    if nivel_sim == "Grado Medio":
+        # Versión sencilla: la nota media es la base principal
+        return round(base, 2)
+
+    # Grado Superior
+    if via_sim == "Vía A1":
+        bonus = 0.0 if relacionada else -0.5
+        return round(base + bonus, 2)
+
+    if via_sim == "Vía A2":
+        bonus = -0.5 if relacionada else 0.0
+        return round(base + bonus, 2)
+
+    return round(base, 2)
 
 
 st.title("FP Match Madrid")
@@ -153,6 +223,17 @@ except Exception as e:
 
 familias = ["Todas"] + sorted([f for f in df["familia"].dropna().unique() if str(f).strip()])
 municipios = ["Todos"] + sorted([m for m in df["municipio"].dropna().unique() if str(m).strip()])
+
+# --- Cartel informativo ---
+st.info(
+    """
+**Cómo funciona el baremo**
+- En **Grado Medio** se muestran cortes de **Vía A**, **B** y **C**.
+- En **Grado Superior** se muestran cortes de **Vía A1**, **A2**, **B** y **C**.
+- La puntuación del alumno depende de su vía de acceso y de su nota media.
+- El simulador de abajo sirve para estimar su puntuación y compararla con los cortes publicados.
+"""
+)
 
 col1, col2, col3, col4, col5 = st.columns([2.3, 1, 1.3, 1.2, 1.1])
 
@@ -177,7 +258,6 @@ with col4:
 with col5:
     turno_filtro = st.selectbox("Turno", ["Ambas", "Diurno", "Vespertino"])
 
-# No mostrar resultados de entrada: esperar a que el usuario filtre o busque algo
 hay_filtro_activo = (
     query.strip() != ""
     or nivel != "Todos"
@@ -191,7 +271,6 @@ if not hay_filtro_activo:
 else:
     filtered = search_cycles(df, query, nivel, familia, municipio, turno_filtro)
 
-    # Columnas base: quitamos nivel y familia porque ya se filtran arriba
     base_columns = [
         "ciclo",
         "municipio",
@@ -200,7 +279,6 @@ else:
         "turno",
     ]
 
-    # Cortes a mostrar según nivel
     if nivel == "Grado Medio":
         preferred_columns = base_columns + ["via_a", "via_b", "via_c"]
     elif nivel == "Grado Superior":
@@ -231,7 +309,6 @@ else:
     else:
         display_df = filtered[visible_columns].copy()
 
-        # Ocultar columnas completamente vacías en la vista actual
         non_empty_cols = []
         for col in display_df.columns:
             if display_df[col].astype(str).str.strip().ne("").any():
@@ -249,28 +326,42 @@ else:
             mime="text/csv"
         )
 
-with st.expander("¿Cómo se consiguen los puntos?"):
+st.markdown("---")
+st.subheader("Simulador de puntuación")
+
+sim_col1, sim_col2, sim_col3 = st.columns([1.2, 1.2, 1])
+
+with sim_col1:
+    nivel_sim = st.selectbox("Nivel del simulador", ["Grado Medio", "Grado Superior"])
+
+with sim_col2:
+    if nivel_sim == "Grado Medio":
+        via_sim = st.selectbox("Vía", ["Vía A"])
+    else:
+        via_sim = st.selectbox("Vía", ["Vía A1", "Vía A2"])
+
+with sim_col3:
+    nota_media = st.number_input("Nota media", min_value=0.0, max_value=10.0, value=5.0, step=0.01)
+
+relacionada = False
+if nivel_sim == "Grado Superior":
+    relacionada = st.toggle("Modalidad / itinerario relacionado", value=True)
+
+puntuacion = calcular_puntuacion_simulada(nivel_sim, via_sim, nota_media, relacionada)
+
+st.success(f"Puntuación estimada: **{puntuacion}**")
+
+with st.expander("Ver detalle del baremo y advertencias"):
     st.markdown(
         """
-### Grado Medio
-En Grado Medio aparecen las vías **A, B y C** en los listados oficiales.  
-La tabla muestra esos cortes cuando están disponibles.
+### Qué debes tener en cuenta
+- Este simulador sirve para **orientar**.
+- La puntuación final depende del **baremo oficial** y de la **vía de acceso concreta**.
+- La **nota de corte** no es fija: cambia según el ciclo, el centro y el curso.
+- Compárala siempre con las columnas de corte de la tabla.
 
-### Grado Superior
-En Grado Superior los listados distinguen entre **Vía A1**, **Vía A2**, **Vía B** y **Vía C**.  
-Por eso se muestran en columnas separadas.
-
-### Qué muestra esta app
-La tabla reúne:
-- el ciclo
-- el centro y municipio
-- la modalidad y el turno
-- las **notas de corte oficiales del curso 2025-2026**
-
-### Importante
-Si algún valor no aparece, puede deberse a que:
-- no figura corte publicado para esa vía
-- el dato no estaba disponible en el documento original
-- el cruce entre tablas no tiene coincidencia exacta
+### Lectura rápida
+- **Grado Medio**: normalmente te fijarás sobre todo en la **Vía A**.
+- **Grado Superior**: revisa **A1** o **A2** según tu caso.
 """
     )
