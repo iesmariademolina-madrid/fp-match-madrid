@@ -11,7 +11,6 @@ st.set_page_config(
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR / "data" / "processed"
 
-# ---------- ESTILOS ----------
 st.markdown(
     """
     <style>
@@ -78,74 +77,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# ---------- CARGA ----------
-@st.cache_data
-def load_dataset():
-    ciclos_path = DATA_DIR / "ciclos.csv"
-    cortes_path = DATA_DIR / "cortes.csv"
 
-    if not ciclos_path.exists():
-        st.error(f"No se encuentra el archivo: {ciclos_path}")
-        st.stop()
-
-    if not cortes_path.exists():
-        st.error(f"No se encuentra el archivo: {cortes_path}")
-        st.stop()
-
-    if ciclos_path.stat().st_size == 0:
-        st.error("ciclos.csv está vacío.")
-        st.stop()
-
-    if cortes_path.stat().st_size == 0:
-        st.error("cortes.csv está vacío.")
-        st.stop()
-
-    ciclos = pd.read_csv(ciclos_path)
-    cortes = pd.read_csv(cortes_path)
-
-    ciclos.columns = [c.strip().lower() for c in ciclos.columns]
-    cortes.columns = [c.strip().lower() for c in cortes.columns]
-
-    required_ciclos = ["nivel", "familia", "ciclo", "municipio", "centro"]
-    required_cortes = ["nivel", "ciclo", "centro"]
-
-    for col in required_ciclos:
-        if col not in ciclos.columns:
-            st.error(f"Falta la columna '{col}' en ciclos.csv")
-            st.stop()
-
-    for col in required_cortes:
-        if col not in cortes.columns:
-            st.error(f"Falta la columna '{col}' en cortes.csv")
-            st.stop()
-
-    for col in ["modalidad", "turno"]:
-        if col not in ciclos.columns:
-            ciclos[col] = ""
-
-    for col in ["via_a", "via_a1", "via_a2"]:
-        if col not in cortes.columns:
-            cortes[col] = ""
-
-    for col in ciclos.columns:
-        ciclos[col] = ciclos[col].fillna("").astype(str).str.strip()
-
-    for col in cortes.columns:
-        cortes[col] = cortes[col].fillna("").astype(str).str.strip()
-
-    df = pd.merge(
-        ciclos,
-        cortes[["nivel", "ciclo", "centro", "via_a", "via_a1", "via_a2"]],
-        on=["nivel", "ciclo", "centro"],
-        how="left"
-    )
-
-    for col in df.columns:
-        df[col] = df[col].fillna("").astype(str).str.strip()
-
-    return df
-
-# ---------- UTILS ----------
 def normalize_scalar(text):
     return (
         pd.Series([text])
@@ -160,7 +92,6 @@ def normalize_scalar(text):
 
 def infer_turno_group(turno_value):
     t = normalize_scalar(turno_value)
-
     if any(x in t for x in ["vespertino", "tarde", "vesp"]):
         return "Vespertino"
     if any(x in t for x in ["diurno", "manana", "mañana", "matutino"]):
@@ -179,6 +110,13 @@ def to_float_safe(value):
         return float(text)
     except Exception:
         return None
+
+
+def first_non_empty(series):
+    for v in series:
+        if str(v).strip() != "":
+            return str(v).strip()
+    return ""
 
 
 def puntos_por_nota(nota_media):
@@ -309,7 +247,83 @@ def sugerencias_por_modalidad(modalidad):
 
     return []
 
-# ---------- APP ----------
+
+@st.cache_data
+def load_dataset():
+    ciclos_path = DATA_DIR / "ciclos.csv"
+    cortes_path = DATA_DIR / "cortes.csv"
+
+    if not ciclos_path.exists():
+        st.error(f"No se encuentra el archivo: {ciclos_path}")
+        st.stop()
+
+    if not cortes_path.exists():
+        st.error(f"No se encuentra el archivo: {cortes_path}")
+        st.stop()
+
+    if ciclos_path.stat().st_size == 0:
+        st.error("ciclos.csv está vacío.")
+        st.stop()
+
+    if cortes_path.stat().st_size == 0:
+        st.error("cortes.csv está vacío.")
+        st.stop()
+
+    ciclos = pd.read_csv(ciclos_path)
+    cortes = pd.read_csv(cortes_path)
+
+    ciclos.columns = [c.strip().lower() for c in ciclos.columns]
+    cortes.columns = [c.strip().lower() for c in cortes.columns]
+
+    required_ciclos = ["nivel", "familia", "ciclo", "municipio", "centro"]
+    required_cortes = ["nivel", "ciclo", "centro"]
+
+    for col in required_ciclos:
+        if col not in ciclos.columns:
+            st.error(f"Falta la columna '{col}' en ciclos.csv")
+            st.stop()
+
+    for col in required_cortes:
+        if col not in cortes.columns:
+            st.error(f"Falta la columna '{col}' en cortes.csv")
+            st.stop()
+
+    for col in ["modalidad", "turno"]:
+        if col not in ciclos.columns:
+            ciclos[col] = ""
+
+    for col in ["via_a", "via_a1", "via_a2"]:
+        if col not in cortes.columns:
+            cortes[col] = ""
+
+    for col in ciclos.columns:
+        ciclos[col] = ciclos[col].fillna("").astype(str).str.strip()
+
+    for col in cortes.columns:
+        cortes[col] = cortes[col].fillna("").astype(str).str.strip()
+
+    cortes = (
+        cortes.groupby(["nivel", "ciclo", "centro"], as_index=False)
+        .agg({
+            "via_a": first_non_empty,
+            "via_a1": first_non_empty,
+            "via_a2": first_non_empty,
+        })
+    )
+
+    df = pd.merge(
+        ciclos,
+        cortes,
+        on=["nivel", "ciclo", "centro"],
+        how="left"
+    )
+
+    for col in df.columns:
+        df[col] = df[col].fillna("").astype(str).str.strip()
+
+    return df
+
+
 try:
     df = load_dataset()
 except Exception as e:
@@ -344,14 +358,27 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-familias = ["Todas"] + sorted([f for f in df["familia"].dropna().unique() if str(f).strip()])
 municipios = ["Todos"] + sorted([m for m in df["municipio"].dropna().unique() if str(m).strip()])
 
-# FILTROS
 f1, f2, f3, f4 = st.columns([1.2, 1.35, 1.2, 1.1])
 
 with f1:
     nivel = st.selectbox("Nivel", ["Todos", "Grado Medio", "Grado Superior"])
+
+if nivel == "Grado Medio":
+    familias_filtradas = sorted(
+        [f for f in df[df["nivel"] == "Grado Medio"]["familia"].dropna().unique() if str(f).strip()]
+    )
+elif nivel == "Grado Superior":
+    familias_filtradas = sorted(
+        [f for f in df[df["nivel"] == "Grado Superior"]["familia"].dropna().unique() if str(f).strip()]
+    )
+else:
+    familias_filtradas = sorted(
+        [f for f in df["familia"].dropna().unique() if str(f).strip()]
+    )
+
+familias = ["Todas"] + familias_filtradas
 
 with f2:
     familia = st.selectbox("Familia profesional", familias)
@@ -474,14 +501,12 @@ else:
         nivel_tabla = nivel_sim
         filtered = filtered[filtered["nivel"] == nivel_sim]
 
-    # Quitar duplicados reales
     dedup_keys = ["nivel", "ciclo", "municipio", "centro", "modalidad", "turno"]
     for key in dedup_keys:
         if key not in filtered.columns:
             filtered[key] = ""
     filtered = filtered.drop_duplicates(subset=dedup_keys).copy()
 
-    # Priorizar familias sugeridas en GS
     if nivel_tabla == "Grado Superior" and modalidad_bach is not None:
         sugeridas = sugerencias_por_modalidad(modalidad_bach)
         filtered["es_sugerido"] = filtered["familia"].isin(sugeridas) if sugeridas else False
@@ -563,9 +588,7 @@ else:
     else:
         display_df = filtered[visible_columns].copy()
 
-        # Mantener siempre visibles las columnas de corte y estado
         columnas_fijas = ["via_a", "via_a1", "via_a2", "Estado"]
-
         non_empty_cols = []
         for col in display_df.columns:
             if col in columnas_fijas or display_df[col].astype(str).str.strip().ne("").any():
