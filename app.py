@@ -1,4 +1,14 @@
+import streamlit as st
+import pandas as pd
+import sys
 from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from src.load_data import load_dataset
+from src.search import search_cyclesfrom pathlib import Path
 import sys
 
 ROOT = Path(__file__).resolve().parent
