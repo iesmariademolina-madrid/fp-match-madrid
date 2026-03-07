@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 from pathlib import Path
+from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode, JsCode
 
 st.set_page_config(
     page_title="Orientación FP IES MARÍA DE MOLINA",
@@ -13,7 +14,6 @@ DATA_DIR = BASE_DIR / "data" / "processed"
 
 MEDIO_FILE = DATA_DIR / "BAREMO GRADO MEDIO.xlsx"
 SUPERIOR_FILE = DATA_DIR / "BAREMO GRADO SUPERIOR.xlsx"
-
 
 st.markdown(
     """
@@ -225,7 +225,6 @@ def load_data():
     gm.columns = [str(c).strip() for c in gm.columns]
     gs.columns = [str(c).strip() for c in gs.columns]
 
-    # -------- GRADO MEDIO --------
     gm_map = {
         "familia": find_col(gm, ["Familia profesional", "Familia"]),
         "ciclo": find_col(gm, ["Ciclo", "Curso completo", "Denominación"]),
@@ -234,8 +233,6 @@ def load_data():
         "codigo_centro": find_col(gm, ["Código de centro", "Codigo de centro"]),
         "centro": find_col(gm, ["Centro", "Centro docente"]),
         "via_a": find_col(gm, ["A", "Vía A", "Via A", "Nota A"]),
-        "via_b": find_col(gm, ["B", "Vía B", "Via B", "Nota B"]),
-        "via_c": find_col(gm, ["C", "Vía C", "Via C", "Nota C"]),
     }
 
     gm_df = pd.DataFrame({
@@ -254,7 +251,6 @@ def load_data():
         "via_a2": "",
     })
 
-    # -------- GRADO SUPERIOR --------
     gs_map = {
         "familia": find_col(gs, ["Familia profesional", "Familia"]),
         "ciclo": find_col(gs, ["Ciclo", "Curso completo", "Denominación"]),
@@ -290,11 +286,12 @@ def load_data():
     for col in df.columns:
         df[col] = clean_text_series(df[col])
 
-    # quitar filas vacías
     df = df[(df["ciclo"] != "") & (df["centro"] != "")].copy()
 
-    # quitar duplicados reales
-    dedup_keys = ["nivel", "familia", "ciclo", "municipio", "tipo_centro", "centro", "modalidad", "turno", "bilingue", "via_a", "via_a1", "via_a2"]
+    dedup_keys = [
+        "nivel", "familia", "ciclo", "municipio", "tipo_centro",
+        "centro", "modalidad", "turno", "bilingue", "via_a", "via_a1", "via_a2"
+    ]
     df = df.drop_duplicates(subset=dedup_keys).reset_index(drop=True)
 
     return df
@@ -335,6 +332,54 @@ def aplicar_comparacion_puntuacion(df: pd.DataFrame, nivel_tabla: str, puntuacio
     return out
 
 
+def build_aggrid(df_display: pd.DataFrame):
+    gb = GridOptionsBuilder.from_dataframe(df_display)
+    gb.configure_default_column(
+        sortable=True,
+        filter=True,
+        resizable=True,
+        wrapText=False,
+        autoHeight=False,
+    )
+
+    first_col = df_display.columns[0]
+    gb.configure_column(first_col, pinned="left")
+
+    estado_style = JsCode(
+        """
+        function(params) {
+            if (params.value === "✅ Te alcanza") {
+                return {backgroundColor: "#dcfce7", color: "#166534", fontWeight: "600"};
+            }
+            if (params.value === "⚠️ Parcial") {
+                return {backgroundColor: "#fef3c7", color: "#92400e", fontWeight: "600"};
+            }
+            if (params.value === "❌ No te alcanza") {
+                return {backgroundColor: "#fee2e2", color: "#991b1b", fontWeight: "600"};
+            }
+            return {};
+        }
+        """
+    )
+
+    if "Resultado" in df_display.columns:
+        gb.configure_column("Resultado", cellStyle=estado_style)
+
+    gb.configure_grid_options(domLayout="normal")
+    grid_options = gb.build()
+
+    AgGrid(
+        df_display,
+        gridOptions=grid_options,
+        height=480,
+        fit_columns_on_grid_load=False,
+        allow_unsafe_jscode=True,
+        update_mode=GridUpdateMode.NO_UPDATE,
+        theme="streamlit",
+        enable_enterprise_modules=False,
+    )
+
+
 try:
     df = load_data()
 except Exception as e:
@@ -369,8 +414,9 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# -------- FILTROS --------
-top1, top2, top3, top4 = st.columns([1.1, 1.4, 1.2, 1.2])
+municipios_base = sorted([m for m in df["municipio"].unique() if m])
+
+top1, top2, top3, top4 = st.columns([1.1, 1.4, 1.5, 1.2])
 
 with top1:
     nivel = st.selectbox("Nivel", ["Todos", "Grado Medio", "Grado Superior"])
@@ -383,8 +429,6 @@ else:
     base_df = df.copy()
 
 familias = ["Todas"] + sorted([x for x in base_df["familia"].unique() if x])
-municipios = ["Todos"] + sorted([x for x in base_df["municipio"].unique() if x])
-tipos_centro = ["Todos"] + sorted([x for x in base_df["tipo_centro"].unique() if x])
 
 with top2:
     familia = st.selectbox("Familia profesional", familias)
@@ -393,13 +437,15 @@ if familia != "Todas":
     base_df = base_df[base_df["familia"] == familia].copy()
 
 with top3:
-    municipio = st.selectbox("Municipio", ["Todos"] + sorted([x for x in base_df["municipio"].unique() if x]))
+    municipios = sorted([x for x in base_df["municipio"].unique() if x])
+    municipios_sel = st.multiselect("Localidades", municipios)
 
-if municipio != "Todos":
-    base_df = base_df[base_df["municipio"] == municipio].copy()
+if municipios_sel:
+    base_df = base_df[base_df["municipio"].isin(municipios_sel)].copy()
 
 with top4:
-    tipo_centro = st.selectbox("Tipo de centro", ["Todos"] + sorted([x for x in base_df["tipo_centro"].unique() if x]))
+    tipos_centro = ["Todos"] + sorted([x for x in base_df["tipo_centro"].unique() if x])
+    tipo_centro = st.selectbox("Tipo de centro", tipos_centro)
 
 if tipo_centro != "Todos":
     base_df = base_df[base_df["tipo_centro"] == tipo_centro].copy()
@@ -530,7 +576,7 @@ with extra2:
 hay_filtro_activo = (
     nivel != "Todos"
     or familia != "Todas"
-    or municipio != "Todos"
+    or len(municipios_sel) > 0
     or tipo_centro != "Todos"
     or centro != "Todos"
     or modalidad != "Todas"
@@ -567,8 +613,8 @@ else:
         )
 
         display_cols = [
-            "familia",
             "ciclo",
+            "familia",
             "municipio",
             "tipo_centro",
             "centro",
@@ -601,8 +647,8 @@ else:
         )
 
         display_cols = [
-            "familia",
             "ciclo",
+            "familia",
             "modalidad",
             "turno",
             "bilingue",
@@ -628,8 +674,8 @@ else:
         st.info("No se han encontrado resultados con esa combinación de filtros.")
     else:
         rename_map = {
-            "familia": "Familia profesional",
             "ciclo": "Ciclo",
+            "familia": "Familia profesional",
             "municipio": "Municipio",
             "tipo_centro": "Tipo de centro",
             "centro": "Centro",
@@ -645,7 +691,7 @@ else:
         display_df = filtered[[c for c in display_cols if c in filtered.columns]].copy()
         display_df = display_df.rename(columns=rename_map)
 
-        st.dataframe(display_df, use_container_width=True, hide_index=True)
+        build_aggrid(display_df)
 
         csv = display_df.to_csv(index=False).encode("utf-8-sig")
         st.download_button(
