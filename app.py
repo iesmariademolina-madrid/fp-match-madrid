@@ -78,7 +78,6 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-
 # ---------- CARGA ----------
 @st.cache_data
 def load_dataset():
@@ -146,18 +145,7 @@ def load_dataset():
 
     return df
 
-
 # ---------- UTILS ----------
-def normalize_text(series):
-    return (
-        series.astype(str)
-        .str.lower()
-        .str.normalize("NFKD")
-        .str.encode("ascii", errors="ignore")
-        .str.decode("utf-8")
-    )
-
-
 def normalize_scalar(text):
     return (
         pd.Series([text])
@@ -243,63 +231,6 @@ def calcular_puntuacion_via_a(
     return round(puntos, 2), detalle
 
 
-def search_cycles(df, query, nivel, familia, municipio, turno_filtro):
-    result = df.copy()
-
-    if nivel != "Todos":
-        result = result[result["nivel"] == nivel]
-
-    if familia != "Todas":
-        result = result[result["familia"] == familia]
-
-    if municipio != "Todos":
-        result = result[result["municipio"] == municipio]
-
-    result["turno_grupo"] = result["turno"].apply(infer_turno_group)
-
-    if turno_filtro != "Ambas":
-        result = result[result["turno_grupo"] == turno_filtro]
-
-    if query.strip():
-        q = normalize_scalar(query.strip())
-
-        synonym_map = {
-            "deporte": [
-                "deporte", "deportes", "actividad fisica", "actividades fisicas",
-                "actividades fisicas y deportivas", "acondicionamiento fisico",
-                "sociodeportiva", "guia en el medio natural", "tiempo libre",
-            ],
-            "informatica": [
-                "informatica", "microinformatica", "dam", "daw", "asir", "smr",
-            ],
-            "sanidad": [
-                "sanidad", "cuidados auxiliares de enfermeria", "higiene bucodental",
-                "laboratorio", "diagnostico", "farmacia", "protesis dental",
-            ],
-            "marketing": [
-                "marketing", "comercio", "ventas", "publicidad", "gestion comercial",
-            ],
-        }
-
-        terms = synonym_map.get(q, [q])
-
-        ciclo_norm = normalize_text(result["ciclo"])
-        familia_norm = normalize_text(result["familia"])
-        centro_norm = normalize_text(result["centro"])
-        municipio_norm = normalize_text(result["municipio"])
-
-        mask = pd.Series(False, index=result.index)
-        for term in terms:
-            mask = mask | ciclo_norm.str.contains(term, na=False)
-            mask = mask | familia_norm.str.contains(term, na=False)
-            mask = mask | centro_norm.str.contains(term, na=False)
-            mask = mask | municipio_norm.str.contains(term, na=False)
-
-        result = result[mask]
-
-    return result
-
-
 def preparar_columnas_numericas(df):
     out = df.copy()
     if "via_a" in out.columns:
@@ -316,8 +247,9 @@ def aplicar_comparacion_puntuacion(df, nivel_tabla, puntuacion):
 
     if nivel_tabla == "Grado Medio":
         out["corte_referencia"] = out["via_a_num"]
-        out["¿Te alcanza?"] = out["corte_referencia"].apply(
-            lambda x: "Sí" if pd.notna(x) and puntuacion >= x else ("No" if pd.notna(x) else "")
+        out["Estado"] = out["corte_referencia"].apply(
+            lambda x: "✅ Te alcanza" if pd.notna(x) and puntuacion >= x
+            else ("❌ No te alcanza" if pd.notna(x) else "")
         )
 
     elif nivel_tabla == "Grado Superior":
@@ -327,13 +259,19 @@ def aplicar_comparacion_puntuacion(df, nivel_tabla, puntuacion):
         out["¿Te alcanza A2?"] = out["via_a2_num"].apply(
             lambda x: "Sí" if pd.notna(x) and puntuacion >= x else ("No" if pd.notna(x) else "")
         )
-        out["alcanza_alguna"] = out.apply(
-            lambda r: (
-                r.get("¿Te alcanza A1?", "") == "Sí"
-                or r.get("¿Te alcanza A2?", "") == "Sí"
-            ),
-            axis=1,
-        )
+
+        def estado_gs(row):
+            a1 = row.get("¿Te alcanza A1?", "")
+            a2 = row.get("¿Te alcanza A2?", "")
+            if a1 == "Sí" and a2 == "Sí":
+                return "✅ Te alcanza"
+            if a1 == "Sí" or a2 == "Sí":
+                return "⚠️ Parcial"
+            if pd.notna(row.get("via_a1_num")) or pd.notna(row.get("via_a2_num")):
+                return "❌ No te alcanza"
+            return ""
+
+        out["Estado"] = out.apply(estado_gs, axis=1)
 
     return out
 
@@ -342,53 +280,34 @@ def sugerencias_por_modalidad(modalidad):
     modalidad_norm = normalize_scalar(modalidad)
 
     if modalidad_norm == "ciencias y tecnologia":
-        return {
-            "familias": [
-                "Informática y Comunicaciones",
-                "Electricidad y Electrónica",
-                "Instalación y Mantenimiento",
-                "Fabricación Mecánica",
-                "Química",
-                "Sanidad",
-                "Edificación y Obra Civil",
-                "Energía y Agua",
-            ],
-            "keywords": [
-                "informática", "daw", "dam", "asir", "laboratorio",
-                "diagnóstico", "imagen", "electricidad", "mecánica"
-            ],
-        }
+        return [
+            "Informática y Comunicaciones",
+            "Electricidad y Electrónica",
+            "Instalación y Mantenimiento",
+            "Fabricación Mecánica",
+            "Química",
+            "Sanidad",
+            "Edificación y Obra Civil",
+            "Energía y Agua",
+        ]
 
     if modalidad_norm == "humanidades y ciencias sociales":
-        return {
-            "familias": [
-                "Administración y Gestión",
-                "Comercio y Marketing",
-                "Servicios Socioculturales y a la Comunidad",
-                "Hostelería y Turismo",
-                "Sanidad",
-            ],
-            "keywords": [
-                "administración", "finanzas", "marketing", "comercio",
-                "turismo", "educación infantil", "integración social"
-            ],
-        }
+        return [
+            "Administración y Gestión",
+            "Comercio y Marketing",
+            "Servicios Socioculturales y a la Comunidad",
+            "Hostelería y Turismo",
+            "Sanidad",
+        ]
 
     if modalidad_norm == "artes":
-        return {
-            "familias": [
-                "Imagen y Sonido",
-                "Artes Gráficas",
-                "Textil, Confección y Piel",
-            ],
-            "keywords": [
-                "imagen", "sonido", "animación", "audiovisual",
-                "gráfica", "fotografía"
-            ],
-        }
+        return [
+            "Imagen y Sonido",
+            "Artes Gráficas",
+            "Textil, Confección y Piel",
+        ]
 
-    return {"familias": [], "keywords": []}
-
+    return []
 
 # ---------- APP ----------
 try:
@@ -415,7 +334,7 @@ st.markdown(
     <div class="info-card">
         <div class="section-title">Qué puedes hacer aquí</div>
         <div class="small-note">
-            Busca por palabra, filtra por nivel, municipio o turno y compara tu puntuación estimada
+            Filtra por nivel, familia profesional, municipio y turno. Después compara tu puntuación estimada
             con las notas de corte oficiales. En esta app trabajamos solo con la <b>vía A</b>:
             en <b>Grado Medio</b> se compara con <b>Vía A</b> y en <b>Grado Superior</b> con
             <b>Vía A1</b> y <b>Vía A2</b>.
@@ -429,24 +348,18 @@ familias = ["Todas"] + sorted([f for f in df["familia"].dropna().unique() if str
 municipios = ["Todos"] + sorted([m for m in df["municipio"].dropna().unique() if str(m).strip()])
 
 # FILTROS
-f1, f2, f3, f4, f5 = st.columns([2.4, 1.1, 1.35, 1.2, 1.1])
+f1, f2, f3, f4 = st.columns([1.2, 1.35, 1.2, 1.1])
 
 with f1:
-    query = st.text_input(
-        "Buscar por palabra",
-        placeholder="Ej.: sanidad, informática, marketing..."
-    )
-
-with f2:
     nivel = st.selectbox("Nivel", ["Todos", "Grado Medio", "Grado Superior"])
 
-with f3:
+with f2:
     familia = st.selectbox("Familia profesional", familias)
 
-with f4:
+with f3:
     municipio = st.selectbox("Municipio", municipios)
 
-with f5:
+with f4:
     turno_filtro = st.selectbox("Turno", ["Ambas", "Diurno", "Vespertino"])
 
 st.markdown("---")
@@ -483,8 +396,7 @@ if nivel_sim == "Grado Superior":
         ],
     )
 
-    sugerencias = sugerencias_por_modalidad(modalidad_bach)
-    familias_sugeridas = sugerencias["familias"]
+    familias_sugeridas = sugerencias_por_modalidad(modalidad_bach)
 
     if familias_sugeridas:
         relacionada = True
@@ -493,10 +405,10 @@ if nivel_sim == "Grado Superior":
             f"""
             <div class="suggestion-box">
                 <div class="section-title" style="font-size:1rem; margin-bottom:0.45rem;">
-                    Grados que podrían encajar con tu modalidad
+                    Familias que pueden encajar mejor contigo
                 </div>
                 <div class="small-note" style="margin-bottom:0.45rem;">
-                    Según la modalidad elegida, estas familias profesionales suelen encajar mejor:
+                    Según la modalidad elegida, estas familias suelen ser una buena orientación inicial:
                 </div>
                 <div>{pills}</div>
             </div>
@@ -505,7 +417,6 @@ if nivel_sim == "Grado Superior":
         )
     else:
         st.info("No se han activado sugerencias automáticas para esa modalidad.")
-
 else:
     sim1, sim2 = st.columns([1, 1])
     with sim1:
@@ -533,43 +444,65 @@ st.dataframe(detalle_df, use_container_width=True, hide_index=True)
 solo_alcanza = st.toggle("Mostrar solo los ciclos que podría hacer", value=False)
 
 hay_filtro_activo = (
-    query.strip() != ""
-    or nivel != "Todos"
+    nivel != "Todos"
     or familia != "Todas"
     or municipio != "Todos"
     or turno_filtro != "Ambas"
 )
 
 if not hay_filtro_activo:
-    st.info("Escribe una palabra o aplica algún filtro para ver resultados.")
+    st.info("Aplica algún filtro para ver resultados.")
 else:
-    filtered = search_cycles(df, query, nivel, familia, municipio, turno_filtro)
+    filtered = df.copy()
+
+    if nivel != "Todos":
+        filtered = filtered[filtered["nivel"] == nivel]
+
+    if familia != "Todas":
+        filtered = filtered[filtered["familia"] == familia]
+
+    if municipio != "Todos":
+        filtered = filtered[filtered["municipio"] == municipio]
+
+    filtered["turno_grupo"] = filtered["turno"].apply(infer_turno_group)
+
+    if turno_filtro != "Ambas":
+        filtered = filtered[filtered["turno_grupo"] == turno_filtro]
 
     nivel_tabla = nivel
     if nivel_tabla == "Todos":
         nivel_tabla = nivel_sim
         filtered = filtered[filtered["nivel"] == nivel_sim]
 
-    # Si es GS y hay modalidad elegida, priorizamos las familias sugeridas
+    # Quitar duplicados reales
+    dedup_keys = ["nivel", "ciclo", "municipio", "centro", "modalidad", "turno"]
+    for key in dedup_keys:
+        if key not in filtered.columns:
+            filtered[key] = ""
+    filtered = filtered.drop_duplicates(subset=dedup_keys).copy()
+
+    # Priorizar familias sugeridas en GS
     if nivel_tabla == "Grado Superior" and modalidad_bach is not None:
-        sugeridas = sugerencias_por_modalidad(modalidad_bach)["familias"]
+        sugeridas = sugerencias_por_modalidad(modalidad_bach)
         if sugeridas:
             filtered["es_sugerido"] = filtered["familia"].isin(sugeridas)
-            filtered = filtered.sort_values(by="es_sugerido", ascending=False)
+        else:
+            filtered["es_sugerido"] = False
+    else:
+        filtered["es_sugerido"] = False
 
     filtered = aplicar_comparacion_puntuacion(filtered, nivel_tabla, puntuacion)
 
-    dup_keys = ["nivel", "ciclo", "municipio", "centro", "modalidad", "turno"]
-    for key in dup_keys:
-        if key not in filtered.columns:
-            filtered[key] = ""
-
-    filtered["posible_duplicado"] = filtered.duplicated(subset=dup_keys, keep=False)
-    filtered["Revisar dato"] = filtered["posible_duplicado"].apply(lambda x: "Sí" if x else "")
-
     if nivel_tabla == "Grado Medio":
         if solo_alcanza:
-            filtered = filtered[filtered["¿Te alcanza?"] == "Sí"]
+            filtered = filtered[filtered["Estado"] == "✅ Te alcanza"]
+
+        filtered["orden_corte"] = filtered["via_a"].apply(to_float_safe)
+        filtered = filtered.sort_values(
+            by=["Estado", "orden_corte", "ciclo"],
+            ascending=[False, True, True],
+            na_position="last"
+        )
 
         preferred_columns = [
             "ciclo",
@@ -578,15 +511,22 @@ else:
             "modalidad",
             "turno",
             "via_a",
-            "¿Te alcanza?",
-            "Revisar dato",
+            "Estado",
         ]
 
     else:
         if solo_alcanza:
-            filtered = filtered[
-                (filtered["¿Te alcanza A1?"] == "Sí") | (filtered["¿Te alcanza A2?"] == "Sí")
-            ]
+            filtered = filtered[filtered["Estado"].isin(["✅ Te alcanza", "⚠️ Parcial"])]
+
+        a1_num = filtered["via_a1"].apply(to_float_safe) if "via_a1" in filtered.columns else pd.Series(index=filtered.index, dtype=float)
+        a2_num = filtered["via_a2"].apply(to_float_safe) if "via_a2" in filtered.columns else pd.Series(index=filtered.index, dtype=float)
+        filtered["orden_corte"] = pd.concat([a1_num, a2_num], axis=1).min(axis=1)
+
+        filtered = filtered.sort_values(
+            by=["es_sugerido", "Estado", "orden_corte", "ciclo"],
+            ascending=[False, False, True, True],
+            na_position="last"
+        )
 
         preferred_columns = [
             "ciclo",
@@ -596,9 +536,7 @@ else:
             "turno",
             "via_a1",
             "via_a2",
-            "¿Te alcanza A1?",
-            "¿Te alcanza A2?",
-            "Revisar dato",
+            "Estado",
         ]
 
     visible_columns = [c for c in preferred_columns if c in filtered.columns]
@@ -612,10 +550,7 @@ else:
         "via_a": "Corte Vía A",
         "via_a1": "Corte Vía A1",
         "via_a2": "Corte Vía A2",
-        "¿Te alcanza?": "¿Te alcanza?",
-        "¿Te alcanza A1?": "¿Te alcanza A1?",
-        "¿Te alcanza A2?": "¿Te alcanza A2?",
-        "Revisar dato": "Posible duplicado",
+        "Estado": "Resultado",
     }
 
     st.markdown("---")
@@ -623,17 +558,11 @@ else:
 
     r1, r2 = st.columns([1, 1])
     r1.metric("Coincidencias", len(filtered))
-    if nivel_tabla == "Grado Medio":
-        alcanzables = (filtered.get("¿Te alcanza?", pd.Series(dtype=str)) == "Sí").sum()
-    else:
-        alcanzables = (
-            ((filtered.get("¿Te alcanza A1?", pd.Series(dtype=str)) == "Sí") |
-             (filtered.get("¿Te alcanza A2?", pd.Series(dtype=str)) == "Sí"))
-        ).sum()
-    r2.metric("Opciones alcanzables", int(alcanzables))
+    alcanzables = (filtered.get("Estado", pd.Series(dtype=str)).isin(["✅ Te alcanza", "⚠️ Parcial"])).sum()
+    r2.metric("Opciones favorables", int(alcanzables))
 
     if len(filtered) == 0:
-        st.info("No se han encontrado resultados con esa búsqueda o combinación de filtros.")
+        st.info("No se han encontrado resultados con esa combinación de filtros.")
     else:
         display_df = filtered[visible_columns].copy()
 
