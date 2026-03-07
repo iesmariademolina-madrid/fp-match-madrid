@@ -414,8 +414,6 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-municipios_base = sorted([m for m in df["municipio"].unique() if m])
-
 top1, top2, top3, top4 = st.columns([1.1, 1.4, 1.5, 1.2])
 
 with top1:
@@ -646,22 +644,39 @@ else:
             na_position="last"
         )
 
-        display_cols = [
-            "ciclo",
-            "familia",
-            "modalidad",
-            "turno",
-            "bilingue",
-            "municipio",
-            "tipo_centro",
-            "centro",
-            "via_a1",
-            "via_a2",
-            "Estado",
-        ]
+        if familia != "Todas":
+            display_cols = [
+                "ciclo",
+                "modalidad",
+                "turno",
+                "bilingue",
+                "municipio",
+                "tipo_centro",
+                "centro",
+                "via_a1",
+                "via_a2",
+                "Estado",
+            ]
+        else:
+            display_cols = [
+                "ciclo",
+                "familia",
+                "modalidad",
+                "turno",
+                "bilingue",
+                "municipio",
+                "tipo_centro",
+                "centro",
+                "via_a1",
+                "via_a2",
+                "Estado",
+            ]
 
     st.markdown("---")
     st.subheader("Resultados")
+
+    if familia != "Todas":
+        st.markdown(f"**Familia profesional seleccionada:** {familia}")
 
     r1, r2 = st.columns(2)
     r1.metric("Coincidencias", len(filtered))
