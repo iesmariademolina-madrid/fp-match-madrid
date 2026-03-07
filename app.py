@@ -3,7 +3,7 @@ import pandas as pd
 from pathlib import Path
 
 st.set_page_config(
-    page_title="FP Match Madrid",
+    page_title="Orientación FP IES MARÍA DE MOLINA",
     layout="wide",
     initial_sidebar_state="collapsed"
 )
@@ -19,37 +19,59 @@ st.markdown(
         padding-top: 1rem;
     }
     .hero-box {
-        padding: 1.2rem 1.4rem;
-        border-radius: 18px;
-        background: linear-gradient(135deg, #0f172a 0%, #1d4ed8 100%);
+        padding: 1.35rem 1.5rem;
+        border-radius: 22px;
+        background: linear-gradient(135deg, #0f172a 0%, #1d4ed8 55%, #38bdf8 100%);
         color: white;
         margin-bottom: 1rem;
+        box-shadow: 0 12px 30px rgba(29, 78, 216, 0.18);
     }
     .hero-title {
         font-size: 2rem;
-        font-weight: 700;
+        font-weight: 800;
         margin-bottom: 0.35rem;
+        letter-spacing: -0.02em;
     }
     .hero-subtitle {
         font-size: 1rem;
-        opacity: 0.95;
+        opacity: 0.96;
+        line-height: 1.45;
     }
     .info-card {
-        background: #f8fafc;
-        border: 1px solid #e2e8f0;
-        border-radius: 16px;
-        padding: 1rem 1rem 0.85rem 1rem;
+        background: linear-gradient(180deg, #f8fbff 0%, #f1f5f9 100%);
+        border: 1px solid #dbeafe;
+        border-radius: 18px;
+        padding: 1rem 1rem 0.9rem 1rem;
         margin: 0.5rem 0 1rem 0;
     }
     .section-title {
         font-size: 1.15rem;
-        font-weight: 700;
-        margin-top: 0.2rem;
-        margin-bottom: 0.6rem;
+        font-weight: 800;
+        margin-top: 0.1rem;
+        margin-bottom: 0.55rem;
+        color: #0f172a;
     }
     .small-note {
-        color: #475569;
-        font-size: 0.92rem;
+        color: #334155;
+        font-size: 0.95rem;
+        line-height: 1.5;
+    }
+    .suggestion-box {
+        background: #eff6ff;
+        border: 1px solid #bfdbfe;
+        border-radius: 16px;
+        padding: 0.95rem 1rem;
+        margin: 0.5rem 0 1rem 0;
+    }
+    .pill {
+        display: inline-block;
+        padding: 0.28rem 0.7rem;
+        margin: 0.18rem 0.25rem 0.18rem 0;
+        border-radius: 999px;
+        background: #dbeafe;
+        color: #1e3a8a;
+        font-size: 0.88rem;
+        font-weight: 600;
     }
     </style>
     """,
@@ -112,7 +134,6 @@ def load_dataset():
     for col in cortes.columns:
         cortes[col] = cortes[col].fillna("").astype(str).str.strip()
 
-    # Merge base
     df = pd.merge(
         ciclos,
         cortes[["nivel", "ciclo", "centro", "via_a", "via_a1", "via_a2"]],
@@ -213,45 +234,13 @@ def calcular_puntuacion_via_a(
     else:
         if relacionada:
             puntos += 5
-            detalle.append(("Modalidad de Bachiller relacionada", 5))
+            detalle.append(("Modalidad de Bachillerato relacionada", 5))
 
         p = 12 if madrid else 2
         puntos += p
         detalle.append(("Bachillerato en Madrid / fuera", p))
 
     return round(puntos, 2), detalle
-
-
-def detectar_modalidad_relacionada(ciclo_texto, modalidad_bach):
-    ciclo = normalize_scalar(ciclo_texto)
-    modalidad = normalize_scalar(modalidad_bach)
-
-    tech_keywords = [
-        "informatica", "microinformatica", "asir", "dam", "daw",
-        "electric", "electron", "mecani", "automoc", "fabricacion",
-        "instalacion", "energia", "quimica", "laboratorio",
-        "imagen para el diagnostico", "audiologia", "anatomia",
-        "mantenimiento", "robot", "telecom", "edificacion"
-    ]
-    social_keywords = [
-        "administracion", "finanzas", "marketing", "comercio",
-        "ventas", "publicidad", "turismo", "agencia de viajes",
-        "gestion", "integracion social", "educacion infantil",
-        "servicios", "atencion", "mediacion", "documentacion sanitaria"
-    ]
-    arts_keywords = [
-        "imagen", "sonido", "animacion", "audiovisual", "fotografia",
-        "iluminacion", "produccion audiovisual", "arte", "grafica"
-    ]
-
-    if modalidad == "ciencias y tecnologia":
-        return any(k in ciclo for k in tech_keywords)
-    if modalidad == "humanidades y ciencias sociales":
-        return any(k in ciclo for k in social_keywords)
-    if modalidad == "artes":
-        return any(k in ciclo for k in arts_keywords)
-
-    return False
 
 
 def search_cycles(df, query, nivel, familia, municipio, turno_filtro):
@@ -349,6 +338,58 @@ def aplicar_comparacion_puntuacion(df, nivel_tabla, puntuacion):
     return out
 
 
+def sugerencias_por_modalidad(modalidad):
+    modalidad_norm = normalize_scalar(modalidad)
+
+    if modalidad_norm == "ciencias y tecnologia":
+        return {
+            "familias": [
+                "Informática y Comunicaciones",
+                "Electricidad y Electrónica",
+                "Instalación y Mantenimiento",
+                "Fabricación Mecánica",
+                "Química",
+                "Sanidad",
+                "Edificación y Obra Civil",
+                "Energía y Agua",
+            ],
+            "keywords": [
+                "informática", "daw", "dam", "asir", "laboratorio",
+                "diagnóstico", "imagen", "electricidad", "mecánica"
+            ],
+        }
+
+    if modalidad_norm == "humanidades y ciencias sociales":
+        return {
+            "familias": [
+                "Administración y Gestión",
+                "Comercio y Marketing",
+                "Servicios Socioculturales y a la Comunidad",
+                "Hostelería y Turismo",
+                "Sanidad",
+            ],
+            "keywords": [
+                "administración", "finanzas", "marketing", "comercio",
+                "turismo", "educación infantil", "integración social"
+            ],
+        }
+
+    if modalidad_norm == "artes":
+        return {
+            "familias": [
+                "Imagen y Sonido",
+                "Artes Gráficas",
+                "Textil, Confección y Piel",
+            ],
+            "keywords": [
+                "imagen", "sonido", "animación", "audiovisual",
+                "gráfica", "fotografía"
+            ],
+        }
+
+    return {"familias": [], "keywords": []}
+
+
 # ---------- APP ----------
 try:
     df = load_dataset()
@@ -359,10 +400,10 @@ except Exception as e:
 st.markdown(
     """
     <div class="hero-box">
-        <div class="hero-title">FP Match Madrid</div>
+        <div class="hero-title">Orientación FP IES MARÍA DE MOLINA</div>
         <div class="hero-subtitle">
-            Busca ciclos de FP en Madrid, consulta sus notas de corte 2025-2026
-            y calcula tu puntuación estimada en la vía A.
+            Explora ciclos de FP en Madrid, consulta las notas de corte oficiales 2025-2026
+            y calcula tu puntuación estimada para descubrir qué opciones pueden encajar contigo.
         </div>
     </div>
     """,
@@ -372,11 +413,12 @@ st.markdown(
 st.markdown(
     """
     <div class="info-card">
-        <div class="section-title">Cómo funciona el baremo</div>
+        <div class="section-title">Qué puedes hacer aquí</div>
         <div class="small-note">
-            En esta app trabajamos solo con la <b>vía A</b>, que es la más útil para el alumnado del centro.
-            En <b>Grado Medio</b> se compara con la columna <b>Vía A</b>.
-            En <b>Grado Superior</b> se compara con las columnas oficiales <b>Vía A1</b> y <b>Vía A2</b>.
+            Busca por palabra, filtra por nivel, municipio o turno y compara tu puntuación estimada
+            con las notas de corte oficiales. En esta app trabajamos solo con la <b>vía A</b>:
+            en <b>Grado Medio</b> se compara con <b>Vía A</b> y en <b>Grado Superior</b> con
+            <b>Vía A1</b> y <b>Vía A2</b>.
         </div>
     </div>
     """,
@@ -387,7 +429,7 @@ familias = ["Todas"] + sorted([f for f in df["familia"].dropna().unique() if str
 municipios = ["Todos"] + sorted([m for m in df["municipio"].dropna().unique() if str(m).strip()])
 
 # FILTROS
-f1, f2, f3, f4, f5 = st.columns([2.4, 1.1, 1.3, 1.2, 1.1])
+f1, f2, f3, f4, f5 = st.columns([2.4, 1.1, 1.35, 1.2, 1.1])
 
 with f1:
     query = st.text_input(
@@ -410,10 +452,14 @@ with f5:
 st.markdown("---")
 st.subheader("Simulador de puntuación")
 
-s1, s2, s3 = st.columns([1.1, 1, 1])
+s1, s2, s3 = st.columns([1.15, 1, 1])
 
 with s1:
-    nivel_sim = st.selectbox("Nivel del simulador", ["Grado Medio", "Grado Superior"])
+    if nivel in ["Grado Medio", "Grado Superior"]:
+        nivel_sim = nivel
+        st.text_input("Nivel del simulador", value=nivel_sim, disabled=True)
+    else:
+        nivel_sim = st.selectbox("Nivel del simulador", ["Grado Medio", "Grado Superior"])
 
 with s2:
     nota_media = st.number_input("Nota media", min_value=0.0, max_value=10.0, value=7.0, step=0.01)
@@ -424,35 +470,41 @@ with s3:
 relacionada = False
 mencion = False
 aprovechamiento = False
+modalidad_bach = None
 
 if nivel_sim == "Grado Superior":
-    sim1, sim2 = st.columns([1.2, 2.2])
+    modalidad_bach = st.selectbox(
+        "Modalidad de Bachillerato",
+        [
+            "Ciencias y Tecnología",
+            "Humanidades y Ciencias Sociales",
+            "Artes",
+            "Otra / No lo sé",
+        ],
+    )
 
-    with sim1:
-        modalidad_bach = st.selectbox(
-            "Modalidad de Bachillerato",
-            [
-                "Ciencias y Tecnología",
-                "Humanidades y Ciencias Sociales",
-                "Artes",
-                "Otra / No lo sé",
-            ],
+    sugerencias = sugerencias_por_modalidad(modalidad_bach)
+    familias_sugeridas = sugerencias["familias"]
+
+    if familias_sugeridas:
+        relacionada = True
+        pills = "".join([f'<span class="pill">{fam}</span>' for fam in familias_sugeridas[:8]])
+        st.markdown(
+            f"""
+            <div class="suggestion-box">
+                <div class="section-title" style="font-size:1rem; margin-bottom:0.45rem;">
+                    Grados que podrían encajar con tu modalidad
+                </div>
+                <div class="small-note" style="margin-bottom:0.45rem;">
+                    Según la modalidad elegida, estas familias profesionales suelen encajar mejor:
+                </div>
+                <div>{pills}</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
         )
-
-    with sim2:
-        ciclo_objetivo = st.text_input(
-            "Ciclo que te interesa",
-            placeholder="Ej.: DAW, Higiene Bucodental, Administración y Finanzas..."
-        )
-
-    if ciclo_objetivo.strip():
-        relacionada = detectar_modalidad_relacionada(ciclo_objetivo, modalidad_bach)
-        if relacionada:
-            st.success("Tu modalidad de Bachillerato parece relacionada con ese ciclo.")
-        else:
-            st.warning("No parece una modalidad relacionada, o no se ha podido detectar con claridad.")
     else:
-        st.info("Escribe un ciclo concreto y estimaré si la modalidad de Bachillerato está relacionada.")
+        st.info("No se han activado sugerencias automáticas para esa modalidad.")
 
 else:
     sim1, sim2 = st.columns([1, 1])
@@ -472,8 +524,8 @@ puntuacion, detalle = calcular_puntuacion_via_a(
 
 m1, m2, m3 = st.columns(3)
 m1.metric("Puntuación estimada", f"{puntuacion} puntos")
-m2.metric("Nivel del simulador", nivel_sim)
-m3.metric("Resultados en vía usada", "A" if nivel_sim == "Grado Medio" else "A1 / A2")
+m2.metric("Nivel aplicado", nivel_sim)
+m3.metric("Comparación con cortes", "Vía A" if nivel_sim == "Grado Medio" else "Vía A1 / A2")
 
 detalle_df = pd.DataFrame(detalle, columns=["Criterio", "Puntos"])
 st.dataframe(detalle_df, use_container_width=True, hide_index=True)
@@ -497,6 +549,13 @@ else:
     if nivel_tabla == "Todos":
         nivel_tabla = nivel_sim
         filtered = filtered[filtered["nivel"] == nivel_sim]
+
+    # Si es GS y hay modalidad elegida, priorizamos las familias sugeridas
+    if nivel_tabla == "Grado Superior" and modalidad_bach is not None:
+        sugeridas = sugerencias_por_modalidad(modalidad_bach)["familias"]
+        if sugeridas:
+            filtered["es_sugerido"] = filtered["familia"].isin(sugeridas)
+            filtered = filtered.sort_values(by="es_sugerido", ascending=False)
 
     filtered = aplicar_comparacion_puntuacion(filtered, nivel_tabla, puntuacion)
 
@@ -567,9 +626,10 @@ else:
     if nivel_tabla == "Grado Medio":
         alcanzables = (filtered.get("¿Te alcanza?", pd.Series(dtype=str)) == "Sí").sum()
     else:
-        a1 = (filtered.get("¿Te alcanza A1?", pd.Series(dtype=str)) == "Sí").sum()
-        a2 = (filtered.get("¿Te alcanza A2?", pd.Series(dtype=str)) == "Sí").sum()
-        alcanzables = max(a1, a2)
+        alcanzables = (
+            ((filtered.get("¿Te alcanza A1?", pd.Series(dtype=str)) == "Sí") |
+             (filtered.get("¿Te alcanza A2?", pd.Series(dtype=str)) == "Sí"))
+        ).sum()
     r2.metric("Opciones alcanzables", int(alcanzables))
 
     if len(filtered) == 0:
@@ -590,7 +650,7 @@ else:
         st.download_button(
             "Descargar resultados en CSV",
             data=csv,
-            file_name="fp_match_madrid_resultados.csv",
+            file_name="orientacion_fp_ies_maria_de_molina.csv",
             mime="text/csv"
         )
 
@@ -611,7 +671,8 @@ Se tiene en cuenta:
 - si el Bachillerato se ha cursado en **Madrid o fuera**
 
 ### Importante
-El simulador es orientativo.  
-La comparación final se hace contra los **cortes oficiales** que aparecen en la tabla.
+La comparación final se hace contra los **cortes oficiales** de la tabla:
+- **Grado Medio** → **Vía A**
+- **Grado Superior** → **Vía A1** y **Vía A2**
 """
     )
