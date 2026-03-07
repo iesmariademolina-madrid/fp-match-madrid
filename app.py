@@ -52,7 +52,7 @@ def load_dataset():
         if col not in ciclos.columns:
             ciclos[col] = ""
 
-    for col in ["via_a", "via_b", "via_c", "via_a1", "via_a2"]:
+    for col in ["via_a", "via_a1", "via_a2"]:
         if col not in cortes.columns:
             cortes[col] = ""
 
@@ -64,7 +64,7 @@ def load_dataset():
 
     df = pd.merge(
         ciclos,
-        cortes[["nivel", "ciclo", "centro", "via_a", "via_b", "via_c", "via_a1", "via_a2"]],
+        cortes[["nivel", "ciclo", "centro", "via_a", "via_a1", "via_a2"]],
         on=["nivel", "ciclo", "centro"],
         how="left"
     )
@@ -214,77 +214,90 @@ def puntos_por_anio(anio):
     return 0
 
 
-def calcular_puntuacion(nivel_sim, via_sim, nota_media, madrid, anio, relacionada=False, mencion=False, aprovechamiento=False):
+def calcular_puntuacion_via_a(nivel_sim, nota_media, madrid, anio=None,
+                              relacionada=False, mencion=False, aprovechamiento=False):
     puntos = puntos_por_nota(nota_media)
     detalle = [("Nota media", puntos)]
 
     if nivel_sim == "Grado Medio":
-        if via_sim == "Vía A":
-            p = 12 if madrid else 2
-            puntos += p
-            detalle.append(("ESO en Madrid / fuera", p))
-            if mencion:
-                puntos += 3
-                detalle.append(("Diploma de Mención Honorífica", 3))
-            if aprovechamiento:
-                puntos += 2
-                detalle.append(("Diploma de Aprovechamiento", 2))
+        p = 12 if madrid else 2
+        puntos += p
+        detalle.append(("ESO en Madrid / fuera", p))
 
-        elif via_sim == "Vía B":
-            p = 12 if madrid else 2
-            puntos += p
-            detalle.append(("FP Básica en Madrid / fuera", p))
-            if relacionada:
-                puntos += 5
-                detalle.append(("Familia profesional relacionada", 5))
+        if mencion:
+            puntos += 3
+            detalle.append(("Diploma de Mención Honorífica", 3))
 
-        elif via_sim == "Vía C":
-            p = 12 if madrid else 2
-            puntos += p
-            detalle.append(("Título/prueba en Madrid / fuera", p))
-            p_anio = puntos_por_anio(anio)
-            puntos += p_anio
-            detalle.append(("Año de obtención/superación", p_anio))
+        if aprovechamiento:
+            puntos += 2
+            detalle.append(("Diploma de Aprovechamiento", 2))
 
-    elif nivel_sim == "Grado Superior":
-        if via_sim == "Vía A":
-            if relacionada:
-                puntos += 5
-                detalle.append(("Modalidad de Bachiller relacionada", 5))
-            p = 12 if madrid else 2
-            puntos += p
-            detalle.append(("Bachillerato en Madrid / fuera", p))
-            p_anio = puntos_por_anio(anio)
-            puntos += p_anio
-            detalle.append(("Año de obtención", p_anio))
+    else:
+        if relacionada:
+            puntos += 5
+            detalle.append(("Modalidad de Bachiller relacionada", 5))
 
-        elif via_sim == "Vía B":
-            p = 12 if madrid else 2
-            puntos += p
-            detalle.append(("Grado Medio en Madrid / fuera", p))
-            p_anio = puntos_por_anio(anio)
-            puntos += p_anio
-            detalle.append(("Año de obtención", p_anio))
-            if relacionada:
-                puntos += 10
-                detalle.append(("Misma familia profesional", 10))
+        p = 12 if madrid else 2
+        puntos += p
+        detalle.append(("Bachillerato en Madrid / fuera", p))
 
-        elif via_sim == "Vía C":
-            p = 12 if madrid else 2
-            puntos += p
-            detalle.append(("Título/prueba en Madrid / fuera", p))
-            p_anio = puntos_por_anio(anio)
-            puntos += p_anio
-            detalle.append(("Año de obtención/superación", p_anio))
+        p_anio = puntos_por_anio(anio)
+        puntos += p_anio
+        detalle.append(("Año de obtención", p_anio))
 
     return round(puntos, 2), detalle
 
 
 def to_float_safe(value):
+    if value is None:
+        return None
+    text = str(value).strip()
+    if text == "":
+        return None
+    text = text.replace(",", ".")
     try:
-        return float(str(value).replace(",", "."))
+        return float(text)
     except Exception:
         return None
+
+
+def preparar_columnas_numericas(df):
+    out = df.copy()
+    if "via_a" in out.columns:
+        out["via_a_num"] = out["via_a"].apply(to_float_safe)
+    if "via_a1" in out.columns:
+        out["via_a1_num"] = out["via_a1"].apply(to_float_safe)
+    if "via_a2" in out.columns:
+        out["via_a2_num"] = out["via_a2"].apply(to_float_safe)
+    return out
+
+
+def aplicar_comparacion_puntuacion(df, nivel_tabla, puntuacion):
+    out = preparar_columnas_numericas(df)
+
+    if nivel_tabla == "Grado Medio":
+        out["corte_referencia"] = out["via_a_num"]
+        out["¿Te alcanza?"] = out["corte_referencia"].apply(
+            lambda x: "Sí" if pd.notna(x) and puntuacion >= x else ("No" if pd.notna(x) else "")
+        )
+
+    elif nivel_tabla == "Grado Superior":
+        # Compara por separado A1 y A2 para que sea correcto y transparente
+        out["¿Te alcanza A1?"] = out["via_a1_num"].apply(
+            lambda x: "Sí" if pd.notna(x) and puntuacion >= x else ("No" if pd.notna(x) else "")
+        )
+        out["¿Te alcanza A2?"] = out["via_a2_num"].apply(
+            lambda x: "Sí" if pd.notna(x) and puntuacion >= x else ("No" if pd.notna(x) else "")
+        )
+        out["alcanza_alguna"] = out.apply(
+            lambda r: (
+                r.get("¿Te alcanza A1?", "") == "Sí"
+                or r.get("¿Te alcanza A2?", "") == "Sí"
+            ),
+            axis=1,
+        )
+
+    return out
 
 
 st.title("FP Match Madrid")
@@ -299,9 +312,10 @@ except Exception as e:
 st.info(
     """
 **Baremo resumido**
-- La **nota media** aporta entre **6 y 12 puntos** según tramos.
-- Luego se suman criterios por **vía**: centro en Madrid o fuera, año de obtención y, según el caso, modalidad relacionada, misma familia profesional, diplomas, etc.
-- En la parte inferior puedes marcar exactamente qué condiciones cumples y calcular tu puntuación estimada.
+- La **nota media** aporta una parte de la puntuación.
+- En **Grado Medio** se simula solo la **Vía A**.
+- En **Grado Superior** se simula solo la **Vía A**, y se compara con los cortes publicados de **A1** y **A2**.
+- Después puedes ver qué ciclos quedan a tu alcance según esa puntuación.
 """
 )
 
@@ -313,7 +327,7 @@ col1, col2, col3, col4, col5 = st.columns([2.3, 1, 1.3, 1.2, 1.1])
 with col1:
     query = st.text_input(
         "Buscar por palabra",
-        placeholder="Ej.: sanidad, informática, marketing, deporte..."
+        placeholder="Ej.: sanidad, informática, marketing..."
     )
 
 with col2:
@@ -331,41 +345,39 @@ with col5:
 st.markdown("---")
 st.subheader("Simulador de puntuación")
 
-s1, s2, s3, s4 = st.columns([1.1, 1.1, 1, 1])
+s1, s2, s3, s4 = st.columns([1.2, 1, 1, 1])
 
 with s1:
     nivel_sim = st.selectbox("Nivel del simulador", ["Grado Medio", "Grado Superior"])
 
 with s2:
-    if nivel_sim == "Grado Medio":
-        via_sim = st.selectbox("Vía", ["Vía A", "Vía B", "Vía C"])
-    else:
-        via_sim = st.selectbox("Vía", ["Vía A", "Vía B", "Vía C"])
-
-with s3:
     nota_media = st.number_input("Nota media", min_value=0.0, max_value=10.0, value=7.0, step=0.01)
 
-with s4:
-    madrid = st.toggle("Título o estudios en Madrid", value=True)
+with s3:
+    madrid = st.toggle("Estudios realizados en Madrid", value=True)
 
-extra1, extra2, extra3 = st.columns([1, 1, 1])
+with s4:
+    if nivel_sim == "Grado Superior":
+        anio = st.number_input("Año de obtención", min_value=1990, max_value=2030, value=2025, step=1)
+    else:
+        anio = None
+
+extra1, extra2 = st.columns([1, 1])
 
 with extra1:
-    anio = st.number_input("Año de obtención / superación", min_value=1990, max_value=2030, value=2025, step=1)
+    relacionada = False
+    if nivel_sim == "Grado Superior":
+        relacionada = st.toggle("Modalidad de Bachiller relacionada", value=False)
 
 with extra2:
-    relacionada = st.toggle("Relación con la familia / modalidad", value=False)
-
-with extra3:
     mencion = False
     aprovechamiento = False
-    if nivel_sim == "Grado Medio" and via_sim == "Vía A":
+    if nivel_sim == "Grado Medio":
         mencion = st.toggle("Mención Honorífica", value=False)
         aprovechamiento = st.toggle("Aprovechamiento", value=False)
 
-puntuacion, detalle = calcular_puntuacion(
+puntuacion, detalle = calcular_puntuacion_via_a(
     nivel_sim=nivel_sim,
-    via_sim=via_sim,
     nota_media=nota_media,
     madrid=madrid,
     anio=anio,
@@ -379,7 +391,7 @@ st.success(f"Puntuación estimada: **{puntuacion} puntos**")
 detalle_df = pd.DataFrame(detalle, columns=["Criterio", "Puntos"])
 st.dataframe(detalle_df, use_container_width=True, hide_index=True)
 
-solo_alcanza = st.toggle("Mostrar solo ciclos cuyo corte alcanzo o supero", value=False)
+solo_alcanza = st.toggle("Mostrar solo los ciclos que podría hacer", value=False)
 
 hay_filtro_activo = (
     query.strip() != ""
@@ -394,55 +406,46 @@ if not hay_filtro_activo:
 else:
     filtered = search_cycles(df, query, nivel, familia, municipio, turno_filtro)
 
-    if nivel == "Grado Medio":
-        corte_col = "via_a" if via_sim == "Vía A" else "via_b" if via_sim == "Vía B" else "via_c"
-    elif nivel == "Grado Superior":
-        # En los baremos de corte de GS lo publicado separa A1 y A2, mientras el anexo general habla de Vía A.
-        # Para el simulador, Vía A se compara con la mejor de A1/A2 mostradas.
-        if via_sim == "Vía A":
-            corte_col = "mejor_via_a"
-        elif via_sim == "Vía B":
-            corte_col = "via_b"
-        else:
-            corte_col = "via_c"
-    else:
-        corte_col = None
+    # Para asegurar la comparación correcta, si el nivel del buscador está en "Todos",
+    # se filtra por el nivel elegido en el simulador.
+    nivel_tabla = nivel
+    if nivel_tabla == "Todos":
+        nivel_tabla = nivel_sim
+        filtered = filtered[filtered["nivel"] == nivel_sim]
 
-    if "via_a1" in filtered.columns and "via_a2" in filtered.columns:
-        filtered["via_a1_num"] = filtered["via_a1"].apply(to_float_safe)
-        filtered["via_a2_num"] = filtered["via_a2"].apply(to_float_safe)
-        filtered["mejor_via_a"] = filtered[["via_a1_num", "via_a2_num"]].min(axis=1, skipna=True)
+    filtered = aplicar_comparacion_puntuacion(filtered, nivel_tabla, puntuacion)
 
-    if "via_a" in filtered.columns:
-        filtered["via_a_num"] = filtered["via_a"].apply(to_float_safe)
-    if "via_b" in filtered.columns:
-        filtered["via_b_num"] = filtered["via_b"].apply(to_float_safe)
-    if "via_c" in filtered.columns:
-        filtered["via_c_num"] = filtered["via_c"].apply(to_float_safe)
-
-    if corte_col:
-        if corte_col == "mejor_via_a":
-            filtered["corte_referencia"] = filtered["mejor_via_a"]
-        elif f"{corte_col}_num" in filtered.columns:
-            filtered["corte_referencia"] = filtered[f"{corte_col}_num"]
-        else:
-            filtered["corte_referencia"] = pd.NA
-
-        filtered["Te alcanza"] = filtered["corte_referencia"].apply(
-            lambda x: "Sí" if pd.notna(x) and puntuacion >= x else ("No" if pd.notna(x) else "")
-        )
-
+    if nivel_tabla == "Grado Medio":
         if solo_alcanza:
-            filtered = filtered[filtered["Te alcanza"] == "Sí"]
+            filtered = filtered[filtered["¿Te alcanza?"] == "Sí"]
 
-    base_columns = ["ciclo", "municipio", "centro", "modalidad", "turno"]
+        preferred_columns = [
+            "ciclo",
+            "municipio",
+            "centro",
+            "modalidad",
+            "turno",
+            "via_a",
+            "¿Te alcanza?",
+        ]
 
-    if nivel == "Grado Medio":
-        preferred_columns = base_columns + ["via_a", "via_b", "via_c", "Te alcanza"]
-    elif nivel == "Grado Superior":
-        preferred_columns = base_columns + ["via_a1", "via_a2", "via_b", "via_c", "Te alcanza"]
     else:
-        preferred_columns = base_columns + ["via_a", "via_a1", "via_a2", "via_b", "via_c", "Te alcanza"]
+        if solo_alcanza:
+            filtered = filtered[
+                (filtered["¿Te alcanza A1?"] == "Sí") | (filtered["¿Te alcanza A2?"] == "Sí")
+            ]
+
+        preferred_columns = [
+            "ciclo",
+            "municipio",
+            "centro",
+            "modalidad",
+            "turno",
+            "via_a1",
+            "via_a2",
+            "¿Te alcanza A1?",
+            "¿Te alcanza A2?",
+        ]
 
     visible_columns = [c for c in preferred_columns if c in filtered.columns]
 
@@ -455,9 +458,9 @@ else:
         "via_a": "Corte Vía A",
         "via_a1": "Corte Vía A1",
         "via_a2": "Corte Vía A2",
-        "via_b": "Corte Vía B",
-        "via_c": "Corte Vía C",
-        "Te alcanza": "¿Te alcanza?",
+        "¿Te alcanza?": "¿Te alcanza?",
+        "¿Te alcanza A1?": "¿Te alcanza A1?",
+        "¿Te alcanza A2?": "¿Te alcanza A2?",
     }
 
     st.markdown("---")
@@ -480,14 +483,18 @@ else:
 with st.expander("Ver resumen del baremo"):
     st.markdown(
         """
-**Grado Medio**
-- **Vía A**: nota media + Madrid/fuera + Mención Honorífica/Aprovechamiento.
-- **Vía B**: nota media + Madrid/fuera + familia profesional relacionada.
-- **Vía C**: nota media + Madrid/fuera + año de obtención/superación.
+**Grado Medio – Vía A**
+- Nota media
+- Estudios en Madrid o fuera
+- Mención Honorífica
+- Aprovechamiento
 
-**Grado Superior**
-- **Vía A**: nota media + modalidad de Bachiller relacionada + Madrid/fuera + año.
-- **Vía B**: nota media + Madrid/fuera + año + misma familia profesional.
-- **Vía C**: nota media o prueba + Madrid/fuera + año.
+**Grado Superior – Vía A**
+- Nota media
+- Modalidad de Bachiller relacionada
+- Estudios en Madrid o fuera
+- Año de obtención
+
+La tabla compara esa puntuación con los cortes oficiales mostrados para cada nivel.
 """
     )
