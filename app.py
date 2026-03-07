@@ -40,28 +40,27 @@ def load_dataset():
             st.error(f"Falta la columna '{col}' en cortes.csv")
             st.stop()
 
-    # Asegurar columnas opcionales
+    # Columnas opcionales
     for col in ["modalidad", "turno"]:
         if col not in ciclos.columns:
             ciclos[col] = ""
 
-    for col in ["via_a", "via_a1", "via_a2"]:
+    for col in ["via_a", "via_b", "via_c", "via_a1", "via_a2"]:
         if col not in cortes.columns:
             cortes[col] = ""
 
-    # Normalización básica de texto para mejorar el merge
-    text_cols_ciclos = ["nivel", "ciclo", "centro", "familia", "municipio", "modalidad", "turno"]
-    text_cols_cortes = ["nivel", "ciclo", "centro"]
+    text_cols_ciclos = ["nivel", "familia", "ciclo", "municipio", "centro", "modalidad", "turno"]
+    text_cols_cortes = ["nivel", "ciclo", "centro", "via_a", "via_b", "via_c", "via_a1", "via_a2"]
 
     for col in text_cols_ciclos:
         ciclos[col] = ciclos[col].fillna("").astype(str).str.strip()
 
-    for col in text_cols_cortes + ["via_a", "via_a1", "via_a2"]:
+    for col in text_cols_cortes:
         cortes[col] = cortes[col].fillna("").astype(str).str.strip()
 
     df = pd.merge(
         ciclos,
-        cortes[["nivel", "ciclo", "centro", "via_a", "via_a1", "via_a2"]],
+        cortes[["nivel", "ciclo", "centro", "via_a", "via_b", "via_c", "via_a1", "via_a2"]],
         on=["nivel", "ciclo", "centro"],
         how="left"
     )
@@ -83,7 +82,29 @@ def normalize_text(series):
     )
 
 
-def search_cycles(df, query, nivel, familia, municipio):
+def normalize_scalar(text):
+    return (
+        pd.Series([text])
+        .astype(str)
+        .str.lower()
+        .str.normalize("NFKD")
+        .str.encode("ascii", errors="ignore")
+        .str.decode("utf-8")
+        .iloc[0]
+    )
+
+
+def infer_turno_group(turno_value):
+    t = normalize_scalar(turno_value)
+
+    if any(x in t for x in ["vespertino", "tarde", "vesp"]):
+        return "Vespertino"
+    if any(x in t for x in ["diurno", "manana", "mañana", "matutino"]):
+        return "Diurno"
+    return "Ambas / No indicado"
+
+
+def search_cycles(df, query, nivel, familia, municipio, turno_filtro):
     result = df.copy()
 
     if nivel != "Todos":
@@ -95,16 +116,14 @@ def search_cycles(df, query, nivel, familia, municipio):
     if municipio != "Todos":
         result = result[result["municipio"] == municipio]
 
+    # Crear columna auxiliar de turno agrupado
+    result["turno_grupo"] = result["turno"].apply(infer_turno_group)
+
+    if turno_filtro != "Ambas":
+        result = result[result["turno_grupo"] == turno_filtro]
+
     if query.strip():
-        q = (
-            pd.Series([query.strip()])
-            .astype(str)
-            .str.lower()
-            .str.normalize("NFKD")
-            .str.encode("ascii", errors="ignore")
-            .str.decode("utf-8")
-            .iloc[0]
-        )
+        q = normalize_scalar(query.strip())
 
         ciclo_norm = normalize_text(result["ciclo"])
         familia_norm = normalize_text(result["familia"])
@@ -135,7 +154,7 @@ except Exception as e:
 familias = ["Todas"] + sorted([f for f in df["familia"].dropna().unique() if str(f).strip()])
 municipios = ["Todos"] + sorted([m for m in df["municipio"].dropna().unique() if str(m).strip()])
 
-col1, col2, col3, col4 = st.columns([2.2, 1, 1.3, 1.3])
+col1, col2, col3, col4, col5 = st.columns([2.3, 1, 1.3, 1.2, 1.1])
 
 with col1:
     query = st.text_input(
@@ -155,82 +174,95 @@ with col3:
 with col4:
     municipio = st.selectbox("Municipio", municipios)
 
-filtered = search_cycles(df, query, nivel, familia, municipio)
+with col5:
+    turno_filtro = st.selectbox("Turno", ["Ambas", "Diurno", "Vespertino"])
 
-# Elegir columnas visibles según nivel
-base_columns = [
-    "nivel",
-    "familia",
-    "ciclo",
-    "municipio",
-    "centro",
-    "modalidad",
-    "turno",
-]
+# No mostrar resultados de entrada: esperar a que el usuario filtre o busque algo
+hay_filtro_activo = (
+    query.strip() != ""
+    or nivel != "Todos"
+    or familia != "Todas"
+    or municipio != "Todos"
+    or turno_filtro != "Ambas"
+)
 
-if nivel == "Grado Medio":
-    preferred_columns = base_columns + ["via_a"]
-elif nivel == "Grado Superior":
-    preferred_columns = base_columns + ["via_a1", "via_a2"]
+if not hay_filtro_activo:
+    st.info("Escribe una palabra o aplica algún filtro para ver resultados.")
 else:
-    preferred_columns = base_columns + ["via_a", "via_a1", "via_a2"]
+    filtered = search_cycles(df, query, nivel, familia, municipio, turno_filtro)
 
-visible_columns = [c for c in preferred_columns if c in filtered.columns]
+    # Columnas base: quitamos nivel y familia porque ya se filtran arriba
+    base_columns = [
+        "ciclo",
+        "municipio",
+        "centro",
+        "modalidad",
+        "turno",
+    ]
 
-rename_map = {
-    "nivel": "Nivel",
-    "familia": "Familia profesional",
-    "ciclo": "Ciclo",
-    "municipio": "Municipio",
-    "centro": "Centro",
-    "modalidad": "Modalidad",
-    "turno": "Turno",
-    "via_a": "Corte Vía A",
-    "via_a1": "Corte Vía A1",
-    "via_a2": "Corte Vía A2",
-}
+    # Cortes a mostrar según nivel
+    if nivel == "Grado Medio":
+        preferred_columns = base_columns + ["via_a", "via_b", "via_c"]
+    elif nivel == "Grado Superior":
+        preferred_columns = base_columns + ["via_a1", "via_a2", "via_b", "via_c"]
+    else:
+        preferred_columns = base_columns + ["via_a", "via_a1", "via_a2", "via_b", "via_c"]
 
-st.subheader("Resultados")
-st.write(f"Coincidencias encontradas: {len(filtered)}")
+    visible_columns = [c for c in preferred_columns if c in filtered.columns]
 
-if len(filtered) == 0:
-    st.info("No se han encontrado resultados con esa búsqueda.")
-else:
-    display_df = filtered[visible_columns].copy()
+    rename_map = {
+        "ciclo": "Ciclo",
+        "municipio": "Municipio",
+        "centro": "Centro",
+        "modalidad": "Modalidad",
+        "turno": "Turno",
+        "via_a": "Corte Vía A",
+        "via_a1": "Corte Vía A1",
+        "via_a2": "Corte Vía A2",
+        "via_b": "Corte Vía B",
+        "via_c": "Corte Vía C",
+    }
 
-    # Ocultar columnas completamente vacías en la vista actual
-    non_empty_cols = []
-    for col in display_df.columns:
-        if display_df[col].astype(str).str.strip().ne("").any():
-            non_empty_cols.append(col)
+    st.subheader("Resultados")
+    st.write(f"Coincidencias encontradas: {len(filtered)}")
 
-    display_df = display_df[non_empty_cols].rename(columns=rename_map)
+    if len(filtered) == 0:
+        st.info("No se han encontrado resultados con esa búsqueda o combinación de filtros.")
+    else:
+        display_df = filtered[visible_columns].copy()
 
-    st.dataframe(display_df, use_container_width=True, hide_index=True)
+        # Ocultar columnas completamente vacías en la vista actual
+        non_empty_cols = []
+        for col in display_df.columns:
+            if display_df[col].astype(str).str.strip().ne("").any():
+                non_empty_cols.append(col)
 
-    csv = display_df.to_csv(index=False).encode("utf-8-sig")
-    st.download_button(
-        "Descargar resultados en CSV",
-        data=csv,
-        file_name="fp_match_madrid_resultados.csv",
-        mime="text/csv"
-    )
+        display_df = display_df[non_empty_cols].rename(columns=rename_map)
+
+        st.dataframe(display_df, use_container_width=True, hide_index=True)
+
+        csv = display_df.to_csv(index=False).encode("utf-8-sig")
+        st.download_button(
+            "Descargar resultados en CSV",
+            data=csv,
+            file_name="fp_match_madrid_resultados.csv",
+            mime="text/csv"
+        )
 
 with st.expander("¿Cómo se consiguen los puntos?"):
     st.markdown(
         """
 ### Grado Medio
-En Grado Medio aparece la **Vía A**, además de otras vías en los listados oficiales.  
-En esta app se muestra la **nota de corte de la Vía A** cuando está disponible.
+En Grado Medio aparecen las vías **A, B y C** en los listados oficiales.  
+La tabla muestra esos cortes cuando están disponibles.
 
 ### Grado Superior
-En Grado Superior los listados distinguen entre **Vía A1** y **Vía A2**.  
-Por eso se muestran como columnas separadas.
+En Grado Superior los listados distinguen entre **Vía A1**, **Vía A2**, **Vía B** y **Vía C**.  
+Por eso se muestran en columnas separadas.
 
 ### Qué muestra esta app
 La tabla reúne:
 - el ciclo
-- la familia profesional
 - el centro y municipio
 - la modalidad y el turno
 - las **notas de corte oficiales del curso 2025-2026**
@@ -238,7 +270,7 @@ La tabla reúne:
 ### Importante
 Si algún valor no aparece, puede deberse a que:
 - no figura corte publicado para esa vía
-- el cruce entre oferta y baremo no tiene coincidencia exacta
 - el dato no estaba disponible en el documento original
+- el cruce entre tablas no tiene coincidencia exacta
 """
     )
