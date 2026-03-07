@@ -11,6 +11,10 @@ st.set_page_config(
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR / "data" / "processed"
 
+MEDIO_FILE = DATA_DIR / "BAREMO GRADO MEDIO.xlsx"
+SUPERIOR_FILE = DATA_DIR / "BAREMO GRADO SUPERIOR.xlsx"
+
+
 st.markdown(
     """
     <style>
@@ -90,13 +94,8 @@ def normalize_scalar(text):
     )
 
 
-def infer_turno_group(turno_value):
-    t = normalize_scalar(turno_value)
-    if any(x in t for x in ["vespertino", "tarde", "vesp"]):
-        return "Vespertino"
-    if any(x in t for x in ["diurno", "manana", "mañana", "matutino"]):
-        return "Diurno"
-    return "Ambas / No indicado"
+def clean_text_series(series: pd.Series) -> pd.Series:
+    return series.fillna("").astype(str).str.strip()
 
 
 def to_float_safe(value):
@@ -110,13 +109,6 @@ def to_float_safe(value):
         return float(text)
     except Exception:
         return None
-
-
-def first_non_empty(series):
-    for v in series:
-        if str(v).strip() != "":
-            return str(v).strip()
-    return ""
 
 
 def puntos_por_nota(nota_media):
@@ -169,51 +161,6 @@ def calcular_puntuacion_via_a(
     return round(puntos, 2), detalle
 
 
-def preparar_columnas_numericas(df):
-    out = df.copy()
-    if "via_a" in out.columns:
-        out["via_a_num"] = out["via_a"].apply(to_float_safe)
-    if "via_a1" in out.columns:
-        out["via_a1_num"] = out["via_a1"].apply(to_float_safe)
-    if "via_a2" in out.columns:
-        out["via_a2_num"] = out["via_a2"].apply(to_float_safe)
-    return out
-
-
-def aplicar_comparacion_puntuacion(df, nivel_tabla, puntuacion):
-    out = preparar_columnas_numericas(df)
-
-    if nivel_tabla == "Grado Medio":
-        out["corte_referencia"] = out["via_a_num"]
-        out["Estado"] = out["corte_referencia"].apply(
-            lambda x: "✅ Te alcanza" if pd.notna(x) and puntuacion >= x
-            else ("❌ No te alcanza" if pd.notna(x) else "")
-        )
-
-    elif nivel_tabla == "Grado Superior":
-        out["¿Te alcanza A1?"] = out["via_a1_num"].apply(
-            lambda x: "Sí" if pd.notna(x) and puntuacion >= x else ("No" if pd.notna(x) else "")
-        )
-        out["¿Te alcanza A2?"] = out["via_a2_num"].apply(
-            lambda x: "Sí" if pd.notna(x) and puntuacion >= x else ("No" if pd.notna(x) else "")
-        )
-
-        def estado_gs(row):
-            a1 = row.get("¿Te alcanza A1?", "")
-            a2 = row.get("¿Te alcanza A2?", "")
-            if a1 == "Sí" and a2 == "Sí":
-                return "✅ Te alcanza"
-            if a1 == "Sí" or a2 == "Sí":
-                return "⚠️ Parcial"
-            if pd.notna(row.get("via_a1_num")) or pd.notna(row.get("via_a2_num")):
-                return "❌ No te alcanza"
-            return ""
-
-        out["Estado"] = out.apply(estado_gs, axis=1)
-
-    return out
-
-
 def sugerencias_por_modalidad(modalidad):
     modalidad_norm = normalize_scalar(modalidad)
 
@@ -248,86 +195,150 @@ def sugerencias_por_modalidad(modalidad):
     return []
 
 
+def find_col(df: pd.DataFrame, candidates: list[str]) -> str | None:
+    normalized = {normalize_scalar(c): c for c in df.columns}
+    for cand in candidates:
+        key = normalize_scalar(cand)
+        if key in normalized:
+            return normalized[key]
+    for cand in candidates:
+        key = normalize_scalar(cand)
+        for norm_name, original in normalized.items():
+            if key in norm_name:
+                return original
+    return None
+
+
 @st.cache_data
-def load_dataset():
-    ciclos_path = DATA_DIR / "ciclos.csv"
-    cortes_path = DATA_DIR / "cortes.csv"
-
-    if not ciclos_path.exists():
-        st.error(f"No se encuentra el archivo: {ciclos_path}")
+def load_data():
+    if not MEDIO_FILE.exists():
+        st.error(f"No se encuentra el archivo: {MEDIO_FILE}")
         st.stop()
 
-    if not cortes_path.exists():
-        st.error(f"No se encuentra el archivo: {cortes_path}")
+    if not SUPERIOR_FILE.exists():
+        st.error(f"No se encuentra el archivo: {SUPERIOR_FILE}")
         st.stop()
 
-    if ciclos_path.stat().st_size == 0:
-        st.error("ciclos.csv está vacío.")
-        st.stop()
+    gm = pd.read_excel(MEDIO_FILE)
+    gs = pd.read_excel(SUPERIOR_FILE)
 
-    if cortes_path.stat().st_size == 0:
-        st.error("cortes.csv está vacío.")
-        st.stop()
+    gm.columns = [str(c).strip() for c in gm.columns]
+    gs.columns = [str(c).strip() for c in gs.columns]
 
-    ciclos = pd.read_csv(ciclos_path)
-    cortes = pd.read_csv(cortes_path)
+    # -------- GRADO MEDIO --------
+    gm_map = {
+        "familia": find_col(gm, ["Familia profesional", "Familia"]),
+        "ciclo": find_col(gm, ["Ciclo", "Curso completo", "Denominación"]),
+        "municipio": find_col(gm, ["Municipio"]),
+        "tipo_centro": find_col(gm, ["Tipo de centro", "Tipo centro"]),
+        "codigo_centro": find_col(gm, ["Código de centro", "Codigo de centro"]),
+        "centro": find_col(gm, ["Centro", "Centro docente"]),
+        "via_a": find_col(gm, ["A", "Vía A", "Via A", "Nota A"]),
+        "via_b": find_col(gm, ["B", "Vía B", "Via B", "Nota B"]),
+        "via_c": find_col(gm, ["C", "Vía C", "Via C", "Nota C"]),
+    }
 
-    ciclos.columns = [c.strip().lower() for c in ciclos.columns]
-    cortes.columns = [c.strip().lower() for c in cortes.columns]
+    gm_df = pd.DataFrame({
+        "nivel": "Grado Medio",
+        "familia": clean_text_series(gm[gm_map["familia"]]) if gm_map["familia"] else "",
+        "ciclo": clean_text_series(gm[gm_map["ciclo"]]) if gm_map["ciclo"] else "",
+        "municipio": clean_text_series(gm[gm_map["municipio"]]) if gm_map["municipio"] else "",
+        "tipo_centro": clean_text_series(gm[gm_map["tipo_centro"]]) if gm_map["tipo_centro"] else "",
+        "codigo_centro": clean_text_series(gm[gm_map["codigo_centro"]]) if gm_map["codigo_centro"] else "",
+        "centro": clean_text_series(gm[gm_map["centro"]]) if gm_map["centro"] else "",
+        "modalidad": "",
+        "turno": "",
+        "bilingue": "",
+        "via_a": clean_text_series(gm[gm_map["via_a"]]) if gm_map["via_a"] else "",
+        "via_a1": "",
+        "via_a2": "",
+    })
 
-    required_ciclos = ["nivel", "familia", "ciclo", "municipio", "centro"]
-    required_cortes = ["nivel", "ciclo", "centro"]
+    # -------- GRADO SUPERIOR --------
+    gs_map = {
+        "familia": find_col(gs, ["Familia profesional", "Familia"]),
+        "ciclo": find_col(gs, ["Ciclo", "Curso completo", "Denominación"]),
+        "municipio": find_col(gs, ["Municipio"]),
+        "tipo_centro": find_col(gs, ["Tipo de centro", "Tipo centro"]),
+        "codigo_centro": find_col(gs, ["Código de centro", "Codigo de centro"]),
+        "centro": find_col(gs, ["Centro docente", "Centro"]),
+        "modalidad": find_col(gs, ["Modalidad"]),
+        "turno": find_col(gs, ["Turno"]),
+        "bilingue": find_col(gs, ["Bilingüe", "Bilingue"]),
+        "via_a1": find_col(gs, ["Vía A1", "Via A1", "A1"]),
+        "via_a2": find_col(gs, ["Vía A2", "Via A2", "A2"]),
+    }
 
-    for col in required_ciclos:
-        if col not in ciclos.columns:
-            st.error(f"Falta la columna '{col}' en ciclos.csv")
-            st.stop()
+    gs_df = pd.DataFrame({
+        "nivel": "Grado Superior",
+        "familia": clean_text_series(gs[gs_map["familia"]]) if gs_map["familia"] else "",
+        "ciclo": clean_text_series(gs[gs_map["ciclo"]]) if gs_map["ciclo"] else "",
+        "municipio": clean_text_series(gs[gs_map["municipio"]]) if gs_map["municipio"] else "",
+        "tipo_centro": clean_text_series(gs[gs_map["tipo_centro"]]) if gs_map["tipo_centro"] else "",
+        "codigo_centro": clean_text_series(gs[gs_map["codigo_centro"]]) if gs_map["codigo_centro"] else "",
+        "centro": clean_text_series(gs[gs_map["centro"]]) if gs_map["centro"] else "",
+        "modalidad": clean_text_series(gs[gs_map["modalidad"]]) if gs_map["modalidad"] else "",
+        "turno": clean_text_series(gs[gs_map["turno"]]) if gs_map["turno"] else "",
+        "bilingue": clean_text_series(gs[gs_map["bilingue"]]) if gs_map["bilingue"] else "",
+        "via_a": "",
+        "via_a1": clean_text_series(gs[gs_map["via_a1"]]) if gs_map["via_a1"] else "",
+        "via_a2": clean_text_series(gs[gs_map["via_a2"]]) if gs_map["via_a2"] else "",
+    })
 
-    for col in required_cortes:
-        if col not in cortes.columns:
-            st.error(f"Falta la columna '{col}' en cortes.csv")
-            st.stop()
-
-    for col in ["modalidad", "turno"]:
-        if col not in ciclos.columns:
-            ciclos[col] = ""
-
-    for col in ["via_a", "via_a1", "via_a2"]:
-        if col not in cortes.columns:
-            cortes[col] = ""
-
-    for col in ciclos.columns:
-        ciclos[col] = ciclos[col].fillna("").astype(str).str.strip()
-
-    for col in cortes.columns:
-        cortes[col] = cortes[col].fillna("").astype(str).str.strip()
-
-    cortes = (
-        cortes.groupby(["nivel", "ciclo", "centro"], as_index=False)
-        .agg({
-            "via_a": first_non_empty,
-            "via_a1": first_non_empty,
-            "via_a2": first_non_empty,
-        })
-    )
-
-    df = pd.merge(
-        ciclos,
-        cortes,
-        on=["nivel", "ciclo", "centro"],
-        how="left"
-    )
+    df = pd.concat([gm_df, gs_df], ignore_index=True)
 
     for col in df.columns:
-        df[col] = df[col].fillna("").astype(str).str.strip()
+        df[col] = clean_text_series(df[col])
+
+    # quitar filas vacías
+    df = df[(df["ciclo"] != "") & (df["centro"] != "")].copy()
+
+    # quitar duplicados reales
+    dedup_keys = ["nivel", "familia", "ciclo", "municipio", "tipo_centro", "centro", "modalidad", "turno", "bilingue", "via_a", "via_a1", "via_a2"]
+    df = df.drop_duplicates(subset=dedup_keys).reset_index(drop=True)
 
     return df
 
 
+def aplicar_comparacion_puntuacion(df: pd.DataFrame, nivel_tabla: str, puntuacion: float) -> pd.DataFrame:
+    out = df.copy()
+    out["via_a_num"] = out["via_a"].apply(to_float_safe)
+    out["via_a1_num"] = out["via_a1"].apply(to_float_safe)
+    out["via_a2_num"] = out["via_a2"].apply(to_float_safe)
+
+    if nivel_tabla == "Grado Medio":
+        out["Estado"] = out["via_a_num"].apply(
+            lambda x: "✅ Te alcanza" if pd.notna(x) and puntuacion >= x
+            else ("❌ No te alcanza" if pd.notna(x) else "")
+        )
+    else:
+        out["Estado A1"] = out["via_a1_num"].apply(
+            lambda x: "Sí" if pd.notna(x) and puntuacion >= x else ("No" if pd.notna(x) else "")
+        )
+        out["Estado A2"] = out["via_a2_num"].apply(
+            lambda x: "Sí" if pd.notna(x) and puntuacion >= x else ("No" if pd.notna(x) else "")
+        )
+
+        def resolver_estado(row):
+            a1 = row["Estado A1"]
+            a2 = row["Estado A2"]
+            if a1 == "Sí" and a2 == "Sí":
+                return "✅ Te alcanza"
+            if a1 == "Sí" or a2 == "Sí":
+                return "⚠️ Parcial"
+            if pd.notna(row["via_a1_num"]) or pd.notna(row["via_a2_num"]):
+                return "❌ No te alcanza"
+            return ""
+
+        out["Estado"] = out.apply(resolver_estado, axis=1)
+
+    return out
+
+
 try:
-    df = load_dataset()
+    df = load_data()
 except Exception as e:
-    st.error(f"Error al cargar los datos: {e}")
+    st.error(f"Error al cargar los Excel: {e}")
     st.stop()
 
 st.markdown(
@@ -335,7 +346,7 @@ st.markdown(
     <div class="hero-box">
         <div class="hero-title">Orientación FP IES MARÍA DE MOLINA</div>
         <div class="hero-subtitle">
-            Explora ciclos de FP en Madrid, consulta las notas de corte oficiales 2025-2026
+            Explora ciclos de FP en Madrid, consulta las notas de corte oficiales
             y calcula tu puntuación estimada para descubrir qué opciones pueden encajar contigo.
         </div>
     </div>
@@ -348,51 +359,97 @@ st.markdown(
     <div class="info-card">
         <div class="section-title">Qué puedes hacer aquí</div>
         <div class="small-note">
-            Filtra por nivel, familia profesional, municipio y turno. Después compara tu puntuación estimada
-            con las notas de corte oficiales. En esta app trabajamos solo con la <b>vía A</b>:
-            en <b>Grado Medio</b> se compara con <b>Vía A</b> y en <b>Grado Superior</b> con
-            <b>Vía A1</b> y <b>Vía A2</b>.
+            Filtra por nivel, familia profesional, municipio, tipo de centro y más.
+            En esta app trabajamos con la <b>vía A</b>:
+            en <b>Grado Medio</b> se compara con <b>A</b> y en
+            <b>Grado Superior</b> con <b>A1</b> y <b>A2</b>.
         </div>
     </div>
     """,
     unsafe_allow_html=True,
 )
 
-municipios = ["Todos"] + sorted([m for m in df["municipio"].dropna().unique() if str(m).strip()])
+# -------- FILTROS --------
+top1, top2, top3, top4 = st.columns([1.1, 1.4, 1.2, 1.2])
 
-f1, f2, f3, f4 = st.columns([1.2, 1.35, 1.2, 1.1])
-
-with f1:
+with top1:
     nivel = st.selectbox("Nivel", ["Todos", "Grado Medio", "Grado Superior"])
 
 if nivel == "Grado Medio":
-    familias_filtradas = sorted(
-        [f for f in df[df["nivel"] == "Grado Medio"]["familia"].dropna().unique() if str(f).strip()]
-    )
+    base_df = df[df["nivel"] == "Grado Medio"].copy()
 elif nivel == "Grado Superior":
-    familias_filtradas = sorted(
-        [f for f in df[df["nivel"] == "Grado Superior"]["familia"].dropna().unique() if str(f).strip()]
-    )
+    base_df = df[df["nivel"] == "Grado Superior"].copy()
 else:
-    familias_filtradas = sorted(
-        [f for f in df["familia"].dropna().unique() if str(f).strip()]
-    )
+    base_df = df.copy()
 
-familias = ["Todas"] + familias_filtradas
+familias = ["Todas"] + sorted([x for x in base_df["familia"].unique() if x])
+municipios = ["Todos"] + sorted([x for x in base_df["municipio"].unique() if x])
+tipos_centro = ["Todos"] + sorted([x for x in base_df["tipo_centro"].unique() if x])
 
-with f2:
+with top2:
     familia = st.selectbox("Familia profesional", familias)
 
-with f3:
-    municipio = st.selectbox("Municipio", municipios)
+if familia != "Todas":
+    base_df = base_df[base_df["familia"] == familia].copy()
 
-with f4:
-    turno_filtro = st.selectbox("Turno", ["Ambas", "Diurno", "Vespertino"])
+with top3:
+    municipio = st.selectbox("Municipio", ["Todos"] + sorted([x for x in base_df["municipio"].unique() if x]))
+
+if municipio != "Todos":
+    base_df = base_df[base_df["municipio"] == municipio].copy()
+
+with top4:
+    tipo_centro = st.selectbox("Tipo de centro", ["Todos"] + sorted([x for x in base_df["tipo_centro"].unique() if x]))
+
+if tipo_centro != "Todos":
+    base_df = base_df[base_df["tipo_centro"] == tipo_centro].copy()
+
+adv1, adv2, adv3, adv4 = st.columns([1.5, 1.2, 1.2, 1.2])
+
+with adv1:
+    centros = ["Todos"] + sorted([x for x in base_df["centro"].unique() if x])
+    centro = st.selectbox("Centro", centros)
+
+if centro != "Todos":
+    base_df = base_df[base_df["centro"] == centro].copy()
+
+with adv2:
+    if nivel in ["Todos", "Grado Superior"]:
+        modalidades = ["Todas"] + sorted([x for x in base_df["modalidad"].unique() if x])
+        modalidad = st.selectbox("Modalidad", modalidades)
+    else:
+        modalidad = "Todas"
+        st.selectbox("Modalidad", ["No aplica"], disabled=True)
+
+if modalidad != "Todas":
+    base_df = base_df[base_df["modalidad"] == modalidad].copy()
+
+with adv3:
+    if nivel in ["Todos", "Grado Superior"]:
+        turnos = ["Todos"] + sorted([x for x in base_df["turno"].unique() if x])
+        turno = st.selectbox("Turno", turnos)
+    else:
+        turno = "Todos"
+        st.selectbox("Turno", ["No aplica"], disabled=True)
+
+if turno != "Todos":
+    base_df = base_df[base_df["turno"] == turno].copy()
+
+with adv4:
+    if nivel in ["Todos", "Grado Superior"]:
+        bilingues = ["Todos"] + sorted([x for x in base_df["bilingue"].unique() if x])
+        bilingue = st.selectbox("Bilingüe", bilingues)
+    else:
+        bilingue = "Todos"
+        st.selectbox("Bilingüe", ["No aplica"], disabled=True)
+
+if bilingue != "Todos":
+    base_df = base_df[base_df["bilingue"] == bilingue].copy()
 
 st.markdown("---")
 st.subheader("Simulador de puntuación")
 
-s1, s2, s3 = st.columns([1.15, 1, 1])
+s1, s2, s3 = st.columns([1.1, 1, 1])
 
 with s1:
     if nivel in ["Grado Medio", "Grado Superior"]:
@@ -424,10 +481,9 @@ if nivel_sim == "Grado Superior":
     )
 
     familias_sugeridas = sugerencias_por_modalidad(modalidad_bach)
-
     if familias_sugeridas:
         relacionada = True
-        pills = "".join([f'<span class="pill">{fam}</span>' for fam in familias_sugeridas[:8]])
+        pills = "".join([f'<span class="pill">{fam}</span>' for fam in familias_sugeridas])
         st.markdown(
             f"""
             <div class="suggestion-box">
@@ -442,13 +498,11 @@ if nivel_sim == "Grado Superior":
             """,
             unsafe_allow_html=True,
         )
-    else:
-        st.info("No se han activado sugerencias automáticas para esa modalidad.")
 else:
-    sim1, sim2 = st.columns([1, 1])
-    with sim1:
+    c1, c2 = st.columns(2)
+    with c1:
         mencion = st.toggle("Mención Honorífica", value=False)
-    with sim2:
+    with c2:
         aprovechamiento = st.toggle("Aprovechamiento", value=False)
 
 puntuacion, detalle = calcular_puntuacion_via_a(
@@ -463,138 +517,133 @@ puntuacion, detalle = calcular_puntuacion_via_a(
 m1, m2, m3 = st.columns(3)
 m1.metric("Puntuación estimada", f"{puntuacion} puntos")
 m2.metric("Nivel aplicado", nivel_sim)
-m3.metric("Comparación con cortes", "Vía A" if nivel_sim == "Grado Medio" else "Vía A1 / A2")
+m3.metric("Comparación con cortes", "A" if nivel_sim == "Grado Medio" else "A1 / A2")
 
-detalle_df = pd.DataFrame(detalle, columns=["Criterio", "Puntos"])
-st.dataframe(detalle_df, use_container_width=True, hide_index=True)
+st.dataframe(pd.DataFrame(detalle, columns=["Criterio", "Puntos"]), use_container_width=True, hide_index=True)
 
-solo_alcanza = st.toggle("Ocultar los ciclos que no alcanza", value=False)
+extra1, extra2 = st.columns([1, 1])
+with extra1:
+    nota_max = st.number_input("Nota de corte máxima", min_value=0.0, max_value=20.0, value=20.0, step=0.1)
+with extra2:
+    solo_alcanza = st.toggle("Ocultar los ciclos que no alcanza", value=False)
 
 hay_filtro_activo = (
     nivel != "Todos"
     or familia != "Todas"
     or municipio != "Todos"
-    or turno_filtro != "Ambas"
+    or tipo_centro != "Todos"
+    or centro != "Todos"
+    or modalidad != "Todas"
+    or turno != "Todos"
+    or bilingue != "Todos"
 )
 
 if not hay_filtro_activo:
     st.info("Aplica algún filtro para ver resultados.")
 else:
-    filtered = df.copy()
+    filtered = base_df.copy()
 
-    if nivel != "Todos":
-        filtered = filtered[filtered["nivel"] == nivel]
-
-    if familia != "Todas":
-        filtered = filtered[filtered["familia"] == familia]
-
-    if municipio != "Todos":
-        filtered = filtered[filtered["municipio"] == municipio]
-
-    filtered["turno_grupo"] = filtered["turno"].apply(infer_turno_group)
-
-    if turno_filtro != "Ambas":
-        filtered = filtered[filtered["turno_grupo"] == turno_filtro]
-
-    nivel_tabla = nivel
-    if nivel_tabla == "Todos":
+    if nivel == "Todos":
+        filtered = filtered[filtered["nivel"] == nivel_sim].copy()
         nivel_tabla = nivel_sim
-        filtered = filtered[filtered["nivel"] == nivel_sim]
-
-    dedup_keys = ["nivel", "ciclo", "municipio", "centro", "modalidad", "turno"]
-    for key in dedup_keys:
-        if key not in filtered.columns:
-            filtered[key] = ""
-    filtered = filtered.drop_duplicates(subset=dedup_keys).copy()
-
-    if nivel_tabla == "Grado Superior" and modalidad_bach is not None:
-        sugeridas = sugerencias_por_modalidad(modalidad_bach)
-        filtered["es_sugerido"] = filtered["familia"].isin(sugeridas) if sugeridas else False
     else:
-        filtered["es_sugerido"] = False
+        nivel_tabla = nivel
 
     filtered = aplicar_comparacion_puntuacion(filtered, nivel_tabla, puntuacion)
 
     if nivel_tabla == "Grado Medio":
-        if solo_alcanza:
-            filtered = filtered[filtered["Estado"] == "✅ Te alcanza"]
-
         filtered["orden_corte"] = filtered["via_a"].apply(to_float_safe)
+        filtered = filtered[
+            filtered["orden_corte"].isna() | (filtered["orden_corte"] <= nota_max)
+        ].copy()
+
+        if solo_alcanza:
+            filtered = filtered[filtered["Estado"] == "✅ Te alcanza"].copy()
+
         filtered = filtered.sort_values(
-            by=["Estado", "orden_corte", "ciclo"],
-            ascending=[False, True, True],
+            by=["Estado", "orden_corte", "ciclo", "centro"],
+            ascending=[False, True, True, True],
             na_position="last"
         )
 
-        preferred_columns = [
+        display_cols = [
+            "familia",
             "ciclo",
             "municipio",
+            "tipo_centro",
             "centro",
-            "modalidad",
-            "turno",
             "via_a",
             "Estado",
         ]
 
     else:
-        if solo_alcanza:
-            filtered = filtered[filtered["Estado"].isin(["✅ Te alcanza", "⚠️ Parcial"])]
+        filtered["a1_num"] = filtered["via_a1"].apply(to_float_safe)
+        filtered["a2_num"] = filtered["via_a2"].apply(to_float_safe)
+        filtered["orden_corte"] = pd.concat([filtered["a1_num"], filtered["a2_num"]], axis=1).min(axis=1)
 
-        a1_num = filtered["via_a1"].apply(to_float_safe) if "via_a1" in filtered.columns else pd.Series(index=filtered.index, dtype=float)
-        a2_num = filtered["via_a2"].apply(to_float_safe) if "via_a2" in filtered.columns else pd.Series(index=filtered.index, dtype=float)
-        filtered["orden_corte"] = pd.concat([a1_num, a2_num], axis=1).min(axis=1)
+        filtered = filtered[
+            filtered["orden_corte"].isna() | (filtered["orden_corte"] <= nota_max)
+        ].copy()
+
+        if solo_alcanza:
+            filtered = filtered[filtered["Estado"].isin(["✅ Te alcanza", "⚠️ Parcial"])].copy()
+
+        if modalidad_bach is not None:
+            sugeridas = sugerencias_por_modalidad(modalidad_bach)
+            filtered["es_sugerido"] = filtered["familia"].isin(sugeridas)
+        else:
+            filtered["es_sugerido"] = False
 
         filtered = filtered.sort_values(
-            by=["es_sugerido", "Estado", "orden_corte", "ciclo"],
-            ascending=[False, False, True, True],
+            by=["es_sugerido", "Estado", "orden_corte", "ciclo", "centro"],
+            ascending=[False, False, True, True, True],
             na_position="last"
         )
 
-        preferred_columns = [
+        display_cols = [
+            "familia",
             "ciclo",
-            "municipio",
-            "centro",
             "modalidad",
             "turno",
+            "bilingue",
+            "municipio",
+            "tipo_centro",
+            "centro",
             "via_a1",
             "via_a2",
             "Estado",
         ]
 
-    visible_columns = [c for c in preferred_columns if c in filtered.columns]
-
-    rename_map = {
-        "ciclo": "Ciclo",
-        "municipio": "Municipio",
-        "centro": "Centro",
-        "modalidad": "Modalidad",
-        "turno": "Turno",
-        "via_a": "Corte Vía A",
-        "via_a1": "Corte Vía A1",
-        "via_a2": "Corte Vía A2",
-        "Estado": "Resultado",
-    }
-
     st.markdown("---")
     st.subheader("Resultados")
 
-    r1, r2 = st.columns([1, 1])
+    r1, r2 = st.columns(2)
     r1.metric("Coincidencias", len(filtered))
-    alcanzables = (filtered.get("Estado", pd.Series(dtype=str)).isin(["✅ Te alcanza", "⚠️ Parcial"])).sum()
-    r2.metric("Opciones favorables", int(alcanzables))
+    r2.metric(
+        "Opciones favorables",
+        int((filtered["Estado"].isin(["✅ Te alcanza", "⚠️ Parcial"])).sum())
+    )
 
     if len(filtered) == 0:
         st.info("No se han encontrado resultados con esa combinación de filtros.")
     else:
-        display_df = filtered[visible_columns].copy()
+        rename_map = {
+            "familia": "Familia profesional",
+            "ciclo": "Ciclo",
+            "municipio": "Municipio",
+            "tipo_centro": "Tipo de centro",
+            "centro": "Centro",
+            "modalidad": "Modalidad",
+            "turno": "Turno",
+            "bilingue": "Bilingüe",
+            "via_a": "Corte A",
+            "via_a1": "Corte A1",
+            "via_a2": "Corte A2",
+            "Estado": "Resultado",
+        }
 
-        columnas_fijas = ["via_a", "via_a1", "via_a2", "Estado"]
-        non_empty_cols = []
-        for col in display_df.columns:
-            if col in columnas_fijas or display_df[col].astype(str).str.strip().ne("").any():
-                non_empty_cols.append(col)
-
-        display_df = display_df[non_empty_cols].rename(columns=rename_map)
+        display_df = filtered[[c for c in display_cols if c in filtered.columns]].copy()
+        display_df = display_df.rename(columns=rename_map)
 
         st.dataframe(display_df, use_container_width=True, hide_index=True)
 
@@ -602,7 +651,7 @@ else:
         st.download_button(
             "Descargar resultados en CSV",
             data=csv,
-            file_name="orientacion_fp_ies_maria_de_molina.csv",
+            file_name="orientacion_fp_ies_maria_de_molina_resultados.csv",
             mime="text/csv"
         )
 
@@ -623,8 +672,8 @@ Se tiene en cuenta:
 - si el Bachillerato se ha cursado en **Madrid o fuera**
 
 ### Importante
-La comparación final se hace contra los **cortes oficiales** de la tabla:
-- **Grado Medio** → **Vía A**
-- **Grado Superior** → **Vía A1** y **Vía A2**
+La comparación final se hace contra los datos del Excel:
+- **Grado Medio** → **A**
+- **Grado Superior** → **A1** y **A2**
 """
     )
