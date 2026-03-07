@@ -2,12 +2,62 @@ import streamlit as st
 import pandas as pd
 from pathlib import Path
 
-st.set_page_config(page_title="FP Match Madrid", layout="wide")
+st.set_page_config(
+    page_title="FP Match Madrid",
+    layout="wide",
+    initial_sidebar_state="collapsed"
+)
 
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR / "data" / "processed"
 
+# ---------- ESTILOS ----------
+st.markdown(
+    """
+    <style>
+    .main {
+        padding-top: 1rem;
+    }
+    .hero-box {
+        padding: 1.2rem 1.4rem;
+        border-radius: 18px;
+        background: linear-gradient(135deg, #0f172a 0%, #1d4ed8 100%);
+        color: white;
+        margin-bottom: 1rem;
+    }
+    .hero-title {
+        font-size: 2rem;
+        font-weight: 700;
+        margin-bottom: 0.35rem;
+    }
+    .hero-subtitle {
+        font-size: 1rem;
+        opacity: 0.95;
+    }
+    .info-card {
+        background: #f8fafc;
+        border: 1px solid #e2e8f0;
+        border-radius: 16px;
+        padding: 1rem 1rem 0.85rem 1rem;
+        margin: 0.5rem 0 1rem 0;
+    }
+    .section-title {
+        font-size: 1.15rem;
+        font-weight: 700;
+        margin-top: 0.2rem;
+        margin-bottom: 0.6rem;
+    }
+    .small-note {
+        color: #475569;
+        font-size: 0.92rem;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 
+
+# ---------- CARGA ----------
 @st.cache_data
 def load_dataset():
     ciclos_path = DATA_DIR / "ciclos.csv"
@@ -62,6 +112,7 @@ def load_dataset():
     for col in cortes.columns:
         cortes[col] = cortes[col].fillna("").astype(str).str.strip()
 
+    # Merge base
     df = pd.merge(
         ciclos,
         cortes[["nivel", "ciclo", "centro", "via_a", "via_a1", "via_a2"]],
@@ -75,6 +126,7 @@ def load_dataset():
     return df
 
 
+# ---------- UTILS ----------
 def normalize_text(series):
     return (
         series.astype(str)
@@ -107,81 +159,17 @@ def infer_turno_group(turno_value):
     return "Ambas / No indicado"
 
 
-def search_cycles(df, query, nivel, familia, municipio, turno_filtro):
-    result = df.copy()
-
-    if nivel != "Todos":
-        result = result[result["nivel"] == nivel]
-
-    if familia != "Todas":
-        result = result[result["familia"] == familia]
-
-    if municipio != "Todos":
-        result = result[result["municipio"] == municipio]
-
-    result["turno_grupo"] = result["turno"].apply(infer_turno_group)
-
-    if turno_filtro != "Ambas":
-        result = result[result["turno_grupo"] == turno_filtro]
-
-    if query.strip():
-        q = normalize_scalar(query.strip())
-
-        synonym_map = {
-            "deporte": [
-                "deporte",
-                "deportes",
-                "actividad fisica",
-                "actividades fisicas",
-                "actividades fisicas y deportivas",
-                "acondicionamiento fisico",
-                "sociodeportiva",
-                "guia en el medio natural",
-                "tiempo libre",
-            ],
-            "informatica": [
-                "informatica",
-                "microinformatica",
-                "dam",
-                "daw",
-                "asir",
-                "smr",
-            ],
-            "sanidad": [
-                "sanidad",
-                "cuidados auxiliares de enfermeria",
-                "higiene bucodental",
-                "laboratorio",
-                "diagnostico",
-                "farmacia",
-                "protesis dental",
-            ],
-            "marketing": [
-                "marketing",
-                "comercio",
-                "ventas",
-                "publicidad",
-                "gestion comercial",
-            ],
-        }
-
-        terms = synonym_map.get(q, [q])
-
-        ciclo_norm = normalize_text(result["ciclo"])
-        familia_norm = normalize_text(result["familia"])
-        centro_norm = normalize_text(result["centro"])
-        municipio_norm = normalize_text(result["municipio"])
-
-        mask = pd.Series(False, index=result.index)
-        for term in terms:
-            mask = mask | ciclo_norm.str.contains(term, na=False)
-            mask = mask | familia_norm.str.contains(term, na=False)
-            mask = mask | centro_norm.str.contains(term, na=False)
-            mask = mask | municipio_norm.str.contains(term, na=False)
-
-        result = result[mask]
-
-    return result
+def to_float_safe(value):
+    if value is None:
+        return None
+    text = str(value).strip()
+    if text == "":
+        return None
+    text = text.replace(",", ".")
+    try:
+        return float(text)
+    except Exception:
+        return None
 
 
 def puntos_por_nota(nota_media):
@@ -198,24 +186,14 @@ def puntos_por_nota(nota_media):
     return 0
 
 
-def puntos_por_anio(anio):
-    if anio >= 2008:
-        return 6
-    if anio == 2007:
-        return 4
-    if anio == 2006:
-        return 3
-    if anio == 2005:
-        return 2
-    if anio == 2004:
-        return 1
-    if anio == 2003:
-        return 0.5
-    return 0
-
-
-def calcular_puntuacion_via_a(nivel_sim, nota_media, madrid, anio=None,
-                              relacionada=False, mencion=False, aprovechamiento=False):
+def calcular_puntuacion_via_a(
+    nivel_sim,
+    nota_media,
+    madrid,
+    relacionada=False,
+    mencion=False,
+    aprovechamiento=False
+):
     puntos = puntos_por_nota(nota_media)
     detalle = [("Nota media", puntos)]
 
@@ -241,24 +219,96 @@ def calcular_puntuacion_via_a(nivel_sim, nota_media, madrid, anio=None,
         puntos += p
         detalle.append(("Bachillerato en Madrid / fuera", p))
 
-        p_anio = puntos_por_anio(anio)
-        puntos += p_anio
-        detalle.append(("Año de obtención", p_anio))
-
     return round(puntos, 2), detalle
 
 
-def to_float_safe(value):
-    if value is None:
-        return None
-    text = str(value).strip()
-    if text == "":
-        return None
-    text = text.replace(",", ".")
-    try:
-        return float(text)
-    except Exception:
-        return None
+def detectar_modalidad_relacionada(ciclo_texto, modalidad_bach):
+    ciclo = normalize_scalar(ciclo_texto)
+    modalidad = normalize_scalar(modalidad_bach)
+
+    tech_keywords = [
+        "informatica", "microinformatica", "asir", "dam", "daw",
+        "electric", "electron", "mecani", "automoc", "fabricacion",
+        "instalacion", "energia", "quimica", "laboratorio",
+        "imagen para el diagnostico", "audiologia", "anatomia",
+        "mantenimiento", "robot", "telecom", "edificacion"
+    ]
+    social_keywords = [
+        "administracion", "finanzas", "marketing", "comercio",
+        "ventas", "publicidad", "turismo", "agencia de viajes",
+        "gestion", "integracion social", "educacion infantil",
+        "servicios", "atencion", "mediacion", "documentacion sanitaria"
+    ]
+    arts_keywords = [
+        "imagen", "sonido", "animacion", "audiovisual", "fotografia",
+        "iluminacion", "produccion audiovisual", "arte", "grafica"
+    ]
+
+    if modalidad == "ciencias y tecnologia":
+        return any(k in ciclo for k in tech_keywords)
+    if modalidad == "humanidades y ciencias sociales":
+        return any(k in ciclo for k in social_keywords)
+    if modalidad == "artes":
+        return any(k in ciclo for k in arts_keywords)
+
+    return False
+
+
+def search_cycles(df, query, nivel, familia, municipio, turno_filtro):
+    result = df.copy()
+
+    if nivel != "Todos":
+        result = result[result["nivel"] == nivel]
+
+    if familia != "Todas":
+        result = result[result["familia"] == familia]
+
+    if municipio != "Todos":
+        result = result[result["municipio"] == municipio]
+
+    result["turno_grupo"] = result["turno"].apply(infer_turno_group)
+
+    if turno_filtro != "Ambas":
+        result = result[result["turno_grupo"] == turno_filtro]
+
+    if query.strip():
+        q = normalize_scalar(query.strip())
+
+        synonym_map = {
+            "deporte": [
+                "deporte", "deportes", "actividad fisica", "actividades fisicas",
+                "actividades fisicas y deportivas", "acondicionamiento fisico",
+                "sociodeportiva", "guia en el medio natural", "tiempo libre",
+            ],
+            "informatica": [
+                "informatica", "microinformatica", "dam", "daw", "asir", "smr",
+            ],
+            "sanidad": [
+                "sanidad", "cuidados auxiliares de enfermeria", "higiene bucodental",
+                "laboratorio", "diagnostico", "farmacia", "protesis dental",
+            ],
+            "marketing": [
+                "marketing", "comercio", "ventas", "publicidad", "gestion comercial",
+            ],
+        }
+
+        terms = synonym_map.get(q, [q])
+
+        ciclo_norm = normalize_text(result["ciclo"])
+        familia_norm = normalize_text(result["familia"])
+        centro_norm = normalize_text(result["centro"])
+        municipio_norm = normalize_text(result["municipio"])
+
+        mask = pd.Series(False, index=result.index)
+        for term in terms:
+            mask = mask | ciclo_norm.str.contains(term, na=False)
+            mask = mask | familia_norm.str.contains(term, na=False)
+            mask = mask | centro_norm.str.contains(term, na=False)
+            mask = mask | municipio_norm.str.contains(term, na=False)
+
+        result = result[mask]
+
+    return result
 
 
 def preparar_columnas_numericas(df):
@@ -282,7 +332,6 @@ def aplicar_comparacion_puntuacion(df, nivel_tabla, puntuacion):
         )
 
     elif nivel_tabla == "Grado Superior":
-        # Compara por separado A1 y A2 para que sea correcto y transparente
         out["¿Te alcanza A1?"] = out["via_a1_num"].apply(
             lambda x: "Sí" if pd.notna(x) and puntuacion >= x else ("No" if pd.notna(x) else "")
         )
@@ -300,52 +349,68 @@ def aplicar_comparacion_puntuacion(df, nivel_tabla, puntuacion):
     return out
 
 
-st.title("FP Match Madrid")
-st.caption("Consulta ciclos de FP en Madrid y sus notas de corte oficiales (curso 2025-2026)")
-
+# ---------- APP ----------
 try:
     df = load_dataset()
 except Exception as e:
     st.error(f"Error al cargar los datos: {e}")
     st.stop()
 
-st.info(
+st.markdown(
     """
-**Baremo resumido**
-- La **nota media** aporta una parte de la puntuación.
-- En **Grado Medio** se simula solo la **Vía A**.
-- En **Grado Superior** se simula solo la **Vía A**, y se compara con los cortes publicados de **A1** y **A2**.
-- Después puedes ver qué ciclos quedan a tu alcance según esa puntuación.
-"""
+    <div class="hero-box">
+        <div class="hero-title">FP Match Madrid</div>
+        <div class="hero-subtitle">
+            Busca ciclos de FP en Madrid, consulta sus notas de corte 2025-2026
+            y calcula tu puntuación estimada en la vía A.
+        </div>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+
+st.markdown(
+    """
+    <div class="info-card">
+        <div class="section-title">Cómo funciona el baremo</div>
+        <div class="small-note">
+            En esta app trabajamos solo con la <b>vía A</b>, que es la más útil para el alumnado del centro.
+            En <b>Grado Medio</b> se compara con la columna <b>Vía A</b>.
+            En <b>Grado Superior</b> se compara con las columnas oficiales <b>Vía A1</b> y <b>Vía A2</b>.
+        </div>
+    </div>
+    """,
+    unsafe_allow_html=True,
 )
 
 familias = ["Todas"] + sorted([f for f in df["familia"].dropna().unique() if str(f).strip()])
 municipios = ["Todos"] + sorted([m for m in df["municipio"].dropna().unique() if str(m).strip()])
 
-col1, col2, col3, col4, col5 = st.columns([2.3, 1, 1.3, 1.2, 1.1])
+# FILTROS
+f1, f2, f3, f4, f5 = st.columns([2.4, 1.1, 1.3, 1.2, 1.1])
 
-with col1:
+with f1:
     query = st.text_input(
         "Buscar por palabra",
         placeholder="Ej.: sanidad, informática, marketing..."
     )
 
-with col2:
+with f2:
     nivel = st.selectbox("Nivel", ["Todos", "Grado Medio", "Grado Superior"])
 
-with col3:
+with f3:
     familia = st.selectbox("Familia profesional", familias)
 
-with col4:
+with f4:
     municipio = st.selectbox("Municipio", municipios)
 
-with col5:
+with f5:
     turno_filtro = st.selectbox("Turno", ["Ambas", "Diurno", "Vespertino"])
 
 st.markdown("---")
 st.subheader("Simulador de puntuación")
 
-s1, s2, s3, s4 = st.columns([1.2, 1, 1, 1])
+s1, s2, s3 = st.columns([1.1, 1, 1])
 
 with s1:
     nivel_sim = st.selectbox("Nivel del simulador", ["Grado Medio", "Grado Superior"])
@@ -356,37 +421,59 @@ with s2:
 with s3:
     madrid = st.toggle("Estudios realizados en Madrid", value=True)
 
-with s4:
-    if nivel_sim == "Grado Superior":
-        anio = st.number_input("Año de obtención", min_value=1990, max_value=2030, value=2025, step=1)
+relacionada = False
+mencion = False
+aprovechamiento = False
+
+if nivel_sim == "Grado Superior":
+    sim1, sim2 = st.columns([1.2, 2.2])
+
+    with sim1:
+        modalidad_bach = st.selectbox(
+            "Modalidad de Bachillerato",
+            [
+                "Ciencias y Tecnología",
+                "Humanidades y Ciencias Sociales",
+                "Artes",
+                "Otra / No lo sé",
+            ],
+        )
+
+    with sim2:
+        ciclo_objetivo = st.text_input(
+            "Ciclo que te interesa",
+            placeholder="Ej.: DAW, Higiene Bucodental, Administración y Finanzas..."
+        )
+
+    if ciclo_objetivo.strip():
+        relacionada = detectar_modalidad_relacionada(ciclo_objetivo, modalidad_bach)
+        if relacionada:
+            st.success("Tu modalidad de Bachillerato parece relacionada con ese ciclo.")
+        else:
+            st.warning("No parece una modalidad relacionada, o no se ha podido detectar con claridad.")
     else:
-        anio = None
+        st.info("Escribe un ciclo concreto y estimaré si la modalidad de Bachillerato está relacionada.")
 
-extra1, extra2 = st.columns([1, 1])
-
-with extra1:
-    relacionada = False
-    if nivel_sim == "Grado Superior":
-        relacionada = st.toggle("Modalidad de Bachiller relacionada", value=False)
-
-with extra2:
-    mencion = False
-    aprovechamiento = False
-    if nivel_sim == "Grado Medio":
+else:
+    sim1, sim2 = st.columns([1, 1])
+    with sim1:
         mencion = st.toggle("Mención Honorífica", value=False)
+    with sim2:
         aprovechamiento = st.toggle("Aprovechamiento", value=False)
 
 puntuacion, detalle = calcular_puntuacion_via_a(
     nivel_sim=nivel_sim,
     nota_media=nota_media,
     madrid=madrid,
-    anio=anio,
     relacionada=relacionada,
     mencion=mencion,
     aprovechamiento=aprovechamiento,
 )
 
-st.success(f"Puntuación estimada: **{puntuacion} puntos**")
+m1, m2, m3 = st.columns(3)
+m1.metric("Puntuación estimada", f"{puntuacion} puntos")
+m2.metric("Nivel del simulador", nivel_sim)
+m3.metric("Resultados en vía usada", "A" if nivel_sim == "Grado Medio" else "A1 / A2")
 
 detalle_df = pd.DataFrame(detalle, columns=["Criterio", "Puntos"])
 st.dataframe(detalle_df, use_container_width=True, hide_index=True)
@@ -406,14 +493,20 @@ if not hay_filtro_activo:
 else:
     filtered = search_cycles(df, query, nivel, familia, municipio, turno_filtro)
 
-    # Para asegurar la comparación correcta, si el nivel del buscador está en "Todos",
-    # se filtra por el nivel elegido en el simulador.
     nivel_tabla = nivel
     if nivel_tabla == "Todos":
         nivel_tabla = nivel_sim
         filtered = filtered[filtered["nivel"] == nivel_sim]
 
     filtered = aplicar_comparacion_puntuacion(filtered, nivel_tabla, puntuacion)
+
+    dup_keys = ["nivel", "ciclo", "municipio", "centro", "modalidad", "turno"]
+    for key in dup_keys:
+        if key not in filtered.columns:
+            filtered[key] = ""
+
+    filtered["posible_duplicado"] = filtered.duplicated(subset=dup_keys, keep=False)
+    filtered["Revisar dato"] = filtered["posible_duplicado"].apply(lambda x: "Sí" if x else "")
 
     if nivel_tabla == "Grado Medio":
         if solo_alcanza:
@@ -427,6 +520,7 @@ else:
             "turno",
             "via_a",
             "¿Te alcanza?",
+            "Revisar dato",
         ]
 
     else:
@@ -445,6 +539,7 @@ else:
             "via_a2",
             "¿Te alcanza A1?",
             "¿Te alcanza A2?",
+            "Revisar dato",
         ]
 
     visible_columns = [c for c in preferred_columns if c in filtered.columns]
@@ -461,11 +556,21 @@ else:
         "¿Te alcanza?": "¿Te alcanza?",
         "¿Te alcanza A1?": "¿Te alcanza A1?",
         "¿Te alcanza A2?": "¿Te alcanza A2?",
+        "Revisar dato": "Posible duplicado",
     }
 
     st.markdown("---")
     st.subheader("Resultados")
-    st.write(f"Coincidencias encontradas: {len(filtered)}")
+
+    r1, r2 = st.columns([1, 1])
+    r1.metric("Coincidencias", len(filtered))
+    if nivel_tabla == "Grado Medio":
+        alcanzables = (filtered.get("¿Te alcanza?", pd.Series(dtype=str)) == "Sí").sum()
+    else:
+        a1 = (filtered.get("¿Te alcanza A1?", pd.Series(dtype=str)) == "Sí").sum()
+        a2 = (filtered.get("¿Te alcanza A2?", pd.Series(dtype=str)) == "Sí").sum()
+        alcanzables = max(a1, a2)
+    r2.metric("Opciones alcanzables", int(alcanzables))
 
     if len(filtered) == 0:
         st.info("No se han encontrado resultados con esa búsqueda o combinación de filtros.")
@@ -478,23 +583,35 @@ else:
                 non_empty_cols.append(col)
 
         display_df = display_df[non_empty_cols].rename(columns=rename_map)
+
         st.dataframe(display_df, use_container_width=True, hide_index=True)
+
+        csv = display_df.to_csv(index=False).encode("utf-8-sig")
+        st.download_button(
+            "Descargar resultados en CSV",
+            data=csv,
+            file_name="fp_match_madrid_resultados.csv",
+            mime="text/csv"
+        )
 
 with st.expander("Ver resumen del baremo"):
     st.markdown(
         """
-**Grado Medio – Vía A**
-- Nota media
-- Estudios en Madrid o fuera
-- Mención Honorífica
-- Aprovechamiento
+### Grado Medio – Vía A
+Se tiene en cuenta:
+- la **nota media**
+- si los estudios se han realizado en **Madrid o fuera**
+- **Mención Honorífica**
+- **Aprovechamiento**
 
-**Grado Superior – Vía A**
-- Nota media
-- Modalidad de Bachiller relacionada
-- Estudios en Madrid o fuera
-- Año de obtención
+### Grado Superior – Vía A
+Se tiene en cuenta:
+- la **nota media**
+- si la **modalidad de Bachillerato está relacionada**
+- si el Bachillerato se ha cursado en **Madrid o fuera**
 
-La tabla compara esa puntuación con los cortes oficiales mostrados para cada nivel.
+### Importante
+El simulador es orientativo.  
+La comparación final se hace contra los **cortes oficiales** que aparecen en la tabla.
 """
     )
