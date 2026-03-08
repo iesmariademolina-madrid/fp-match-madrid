@@ -234,7 +234,11 @@ def load_data():
         "familia": exact_col(gm, "Familia profesional") or fallback_col(gm, ["Familia"]),
         "ciclo": exact_col(gm, "Ciclo"),
         "municipio": exact_col(gm, "Municipio"),
-        "tipo_centro": exact_col(gm, "Tipo de centro"),
+        "tipo_centro": (
+            exact_col(gm, "Tipo de centro")
+            or exact_col(gm, "Tipo centro")
+            or fallback_col(gm, ["Tipo"])
+        ),
         "codigo_centro": exact_col(gm, "Código de centro") or exact_col(gm, "Codigo de centro"),
         "centro": exact_col(gm, "Centro"),
         "via_a": exact_col(gm, "A") or exact_col(gm, "Vía A") or exact_col(gm, "Via A") or exact_col(gm, "Nota A"),
@@ -244,7 +248,11 @@ def load_data():
         "familia": exact_col(gs, "Familia profesional") or fallback_col(gs, ["Familia"]),
         "ciclo": exact_col(gs, "Ciclo"),
         "municipio": exact_col(gs, "Municipio"),
-        "tipo_centro": exact_col(gs, "Tipo de centro"),
+        "tipo_centro": (
+            exact_col(gs, "Tipo de centro")
+            or exact_col(gs, "Tipo centro")
+            or fallback_col(gs, ["Tipo"])
+        ),
         "codigo_centro": exact_col(gs, "Código de centro") or exact_col(gs, "Codigo de centro"),
         "centro": exact_col(gs, "Centro docente") or exact_col(gs, "Centro"),
         "modalidad": exact_col(gs, "Modalidad"),
@@ -254,8 +262,8 @@ def load_data():
         "via_a2": exact_col(gs, "Vía A2") or exact_col(gs, "Via A2") or exact_col(gs, "A2"),
     }
 
-    missing_gm = [k for k, v in gm_map.items() if k in ["familia", "ciclo", "municipio", "tipo_centro", "centro", "via_a"] and v is None]
-    missing_gs = [k for k, v in gs_map.items() if k in ["familia", "ciclo", "municipio", "tipo_centro", "centro", "via_a1", "via_a2"] and v is None]
+    missing_gm = [k for k, v in gm_map.items() if k in ["familia", "ciclo", "municipio", "centro", "via_a"] and v is None]
+    missing_gs = [k for k, v in gs_map.items() if k in ["familia", "ciclo", "municipio", "centro", "via_a1", "via_a2"] and v is None]
 
     if missing_gm:
         st.error(f"En el Excel de Grado Medio faltan columnas esperadas: {', '.join(missing_gm)}")
@@ -270,7 +278,7 @@ def load_data():
         "familia": clean_text_series(gm[gm_map["familia"]]),
         "ciclo": clean_text_series(gm[gm_map["ciclo"]]),
         "municipio": clean_text_series(gm[gm_map["municipio"]]),
-        "tipo_centro": clean_text_series(gm[gm_map["tipo_centro"]]),
+        "tipo_centro": clean_text_series(gm[gm_map["tipo_centro"]]) if gm_map["tipo_centro"] else "",
         "codigo_centro": clean_text_series(gm[gm_map["codigo_centro"]]) if gm_map["codigo_centro"] else "",
         "centro": clean_text_series(gm[gm_map["centro"]]),
         "modalidad": "",
@@ -286,7 +294,7 @@ def load_data():
         "familia": clean_text_series(gs[gs_map["familia"]]),
         "ciclo": clean_text_series(gs[gs_map["ciclo"]]),
         "municipio": clean_text_series(gs[gs_map["municipio"]]),
-        "tipo_centro": clean_text_series(gs[gs_map["tipo_centro"]]),
+        "tipo_centro": clean_text_series(gs[gs_map["tipo_centro"]]) if gs_map["tipo_centro"] else "",
         "codigo_centro": clean_text_series(gs[gs_map["codigo_centro"]]) if gs_map["codigo_centro"] else "",
         "centro": clean_text_series(gs[gs_map["centro"]]),
         "modalidad": clean_text_series(gs[gs_map["modalidad"]]) if gs_map["modalidad"] else "",
