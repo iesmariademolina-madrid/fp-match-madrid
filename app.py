@@ -200,20 +200,6 @@ def exact_col(df: pd.DataFrame, name: str) -> str | None:
     return normalized.get(normalize_scalar(name))
 
 
-def fallback_col(df: pd.DataFrame, candidates: list[str]) -> str | None:
-    normalized = {normalize_scalar(c): c for c in df.columns}
-    for cand in candidates:
-        key = normalize_scalar(cand)
-        if key in normalized:
-            return normalized[key]
-    for cand in candidates:
-        key = normalize_scalar(cand)
-        for norm_name, original in normalized.items():
-            if key in norm_name:
-                return original
-    return None
-
-
 @st.cache_data
 def load_data():
     if not MEDIO_FILE.exists():
@@ -224,42 +210,34 @@ def load_data():
         st.error(f"No se encuentra el archivo: {SUPERIOR_FILE}")
         st.stop()
 
-    gm = pd.read_excel(MEDIO_FILE)
-    gs = pd.read_excel(SUPERIOR_FILE)
+    gm = pd.read_excel(MEDIO_FILE, sheet_name=0)
+    gs = pd.read_excel(SUPERIOR_FILE, sheet_name="Datos limpios")
 
     gm.columns = [str(c).strip() for c in gm.columns]
     gs.columns = [str(c).strip() for c in gs.columns]
 
     gm_map = {
-        "familia": exact_col(gm, "Familia profesional") or fallback_col(gm, ["Familia"]),
+        "familia": exact_col(gm, "Familia profesional"),
         "ciclo": exact_col(gm, "Ciclo"),
         "municipio": exact_col(gm, "Municipio"),
-        "tipo_centro": (
-            exact_col(gm, "Tipo de centro")
-            or exact_col(gm, "Tipo centro")
-            or fallback_col(gm, ["Tipo"])
-        ),
-        "codigo_centro": exact_col(gm, "Código de centro") or exact_col(gm, "Codigo de centro"),
+        "tipo_centro": exact_col(gm, "Tipo centro") or exact_col(gm, "Tipo de centro"),
+        "codigo_centro": exact_col(gm, "Código centro") or exact_col(gm, "Código de centro") or exact_col(gm, "Codigo centro"),
         "centro": exact_col(gm, "Centro"),
-        "via_a": exact_col(gm, "A") or exact_col(gm, "Vía A") or exact_col(gm, "Via A") or exact_col(gm, "Nota A"),
+        "via_a": exact_col(gm, "Nota A") or exact_col(gm, "A"),
     }
 
     gs_map = {
-        "familia": exact_col(gs, "Familia profesional") or fallback_col(gs, ["Familia"]),
-        "ciclo": exact_col(gs, "Ciclo"),
+        "familia": exact_col(gs, "Familia profesional"),
+        "ciclo": exact_col(gs, "Ciclo formativo"),
         "municipio": exact_col(gs, "Municipio"),
-        "tipo_centro": (
-            exact_col(gs, "Tipo de centro")
-            or exact_col(gs, "Tipo centro")
-            or fallback_col(gs, ["Tipo"])
-        ),
+        "tipo_centro": exact_col(gs, "Tipo de centro") or exact_col(gs, "Tipo centro"),
         "codigo_centro": exact_col(gs, "Código de centro") or exact_col(gs, "Codigo de centro"),
         "centro": exact_col(gs, "Centro docente") or exact_col(gs, "Centro"),
         "modalidad": exact_col(gs, "Modalidad"),
         "turno": exact_col(gs, "Turno"),
         "bilingue": exact_col(gs, "Bilingüe") or exact_col(gs, "Bilingue"),
-        "via_a1": exact_col(gs, "Vía A1") or exact_col(gs, "Via A1") or exact_col(gs, "A1"),
-        "via_a2": exact_col(gs, "Vía A2") or exact_col(gs, "Via A2") or exact_col(gs, "A2"),
+        "via_a1": exact_col(gs, "Vía A1") or exact_col(gs, "Via A1"),
+        "via_a2": exact_col(gs, "Vía A2") or exact_col(gs, "Via A2"),
     }
 
     missing_gm = [k for k, v in gm_map.items() if k in ["familia", "ciclo", "municipio", "centro", "via_a"] and v is None]
