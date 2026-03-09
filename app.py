@@ -91,6 +91,7 @@ def normalize_scalar(text):
         .str.encode("ascii", errors="ignore")
         .str.decode("utf-8")
         .iloc[0]
+        .strip()
     )
 
 
@@ -125,43 +126,7 @@ def puntos_por_nota(nota_media):
     return 0
 
 
-def calcular_puntuacion_via_a(
-    nivel_sim,
-    nota_media,
-    madrid,
-    relacionada=False,
-    mencion=False,
-    aprovechamiento=False
-):
-    puntos = puntos_por_nota(nota_media)
-    detalle = [("Nota media", puntos)]
-
-    if nivel_sim == "Grado Medio":
-        p = 12 if madrid else 2
-        puntos += p
-        detalle.append(("ESO en Madrid / fuera", p))
-
-        if mencion:
-            puntos += 3
-            detalle.append(("Diploma de Mención Honorífica", 3))
-
-        if aprovechamiento:
-            puntos += 2
-            detalle.append(("Diploma de Aprovechamiento", 2))
-
-    else:
-        if relacionada:
-            puntos += 5
-            detalle.append(("Modalidad de Bachillerato relacionada", 5))
-
-        p = 12 if madrid else 2
-        puntos += p
-        detalle.append(("Bachillerato en Madrid / fuera", p))
-
-    return round(puntos, 2), detalle
-
-
-def sugerencias_por_modalidad(modalidad):
+def familias_relacionadas_por_modalidad(modalidad):
     modalidad_norm = normalize_scalar(modalidad)
 
     if modalidad_norm == "ciencias y tecnologia":
@@ -193,6 +158,47 @@ def sugerencias_por_modalidad(modalidad):
         ]
 
     return []
+
+
+def familia_esta_relacionada(familia, modalidad_bach):
+    if not modalidad_bach:
+        return False
+    sugeridas = familias_relacionadas_por_modalidad(modalidad_bach)
+    familia_norm = normalize_scalar(familia)
+    sugeridas_norm = {normalize_scalar(x) for x in sugeridas}
+    return familia_norm in sugeridas_norm
+
+
+def calcular_puntuacion_base(
+    nivel_sim,
+    nota_media,
+    madrid,
+    mencion=False,
+    aprovechamiento=False
+):
+    puntos = puntos_por_nota(nota_media)
+    detalle = [("Nota media", puntos)]
+
+    if nivel_sim == "Grado Medio":
+        p_madrid = 10 if madrid else 0
+        puntos += p_madrid
+        detalle.append(("Título de ESO obtenido en Madrid", p_madrid))
+
+        if mencion:
+            puntos += 3
+            detalle.append(("Diploma de Mención Honorífica", 3))
+
+        if aprovechamiento:
+            puntos += 2
+            detalle.append(("Diploma de Aprovechamiento", 2))
+
+    else:
+        p_madrid = 10 if madrid else 0
+        puntos += p_madrid
+        detalle.append(("Título obtenido en Madrid", p_madrid))
+        detalle.append(("Ciclo relacionado con la modalidad de Bachillerato", "+3 solo si corresponde"))
+
+    return round(puntos, 2), detalle
 
 
 def exact_col(df: pd.DataFrame, name: str) -> str | None:
@@ -299,23 +305,45 @@ def load_data():
     return df
 
 
-def aplicar_comparacion_puntuacion(df: pd.DataFrame, nivel_tabla: str, puntuacion: float) -> pd.DataFrame:
+def aplicar_comparacion_puntuacion(
+    df: pd.DataFrame,
+    nivel_tabla: str,
+    puntuacion_base: float,
+    modalidad_bach: str | None = None
+) -> pd.DataFrame:
     out = df.copy()
     out["via_a_num"] = out["via_a"].apply(to_float_safe)
     out["via_a1_num"] = out["via_a1"].apply(to_float_safe)
     out["via_a2_num"] = out["via_a2"].apply(to_float_safe)
 
     if nivel_tabla == "Grado Medio":
+        out["puntuacion_aplicable"] = puntuacion_base
         out["Estado"] = out["via_a_num"].apply(
-            lambda x: "✅ Te alcanza" if pd.notna(x) and puntuacion >= x
+            lambda x: "✅ Te alcanza" if pd.notna(x) and puntuacion_base >= x
             else ("❌ No te alcanza" if pd.notna(x) else "")
         )
     else:
-        out["Estado A1"] = out["via_a1_num"].apply(
-            lambda x: "Sí" if pd.notna(x) and puntuacion >= x else ("No" if pd.notna(x) else "")
+        out["es_relacionado"] = out["familia"].apply(
+            lambda fam: familia_esta_relacionada(fam, modalidad_bach)
         )
-        out["Estado A2"] = out["via_a2_num"].apply(
-            lambda x: "Sí" if pd.notna(x) and puntuacion >= x else ("No" if pd.notna(x) else "")
+        out["bonus_modalidad"] = out["es_relacionado"].apply(lambda x: 3 if x else 0)
+        out["puntuacion_aplicable"] = out["bonus_modalidad"].apply(
+            lambda bonus: round(puntuacion_base + bonus, 2)
+        )
+
+        out["Estado A1"] = out.apply(
+            lambda row: (
+                "Sí" if pd.notna(row["via_a1_num"]) and row["puntuacion_aplicable"] >= row["via_a1_num"]
+                else ("No" if pd.notna(row["via_a1_num"]) else "")
+            ),
+            axis=1
+        )
+        out["Estado A2"] = out.apply(
+            lambda row: (
+                "Sí" if pd.notna(row["via_a2_num"]) and row["puntuacion_aplicable"] >= row["via_a2_num"]
+                else ("No" if pd.notna(row["via_a2_num"]) else "")
+            ),
+            axis=1
         )
 
         def resolver_estado(row):
@@ -508,9 +536,8 @@ with s2:
     nota_media = st.number_input("Nota media", min_value=0.0, max_value=10.0, value=7.0, step=0.01)
 
 with s3:
-    madrid = st.toggle("Estudios realizados en Madrid", value=True)
+    madrid = st.toggle("Título obtenido en Madrid", value=True)
 
-relacionada = False
 mencion = False
 aprovechamiento = False
 modalidad_bach = None
@@ -526,18 +553,17 @@ if nivel_sim == "Grado Superior":
         ],
     )
 
-    familias_sugeridas = sugerencias_por_modalidad(modalidad_bach)
+    familias_sugeridas = familias_relacionadas_por_modalidad(modalidad_bach)
     if familias_sugeridas:
-        relacionada = True
         pills = "".join([f'<span class="pill">{fam}</span>' for fam in familias_sugeridas])
         st.markdown(
             f"""
             <div class="suggestion-box">
                 <div class="section-title" style="font-size:1rem; margin-bottom:0.45rem;">
-                    Familias que pueden encajar mejor contigo
+                    Familias relacionadas con la modalidad seleccionada
                 </div>
                 <div class="small-note" style="margin-bottom:0.45rem;">
-                    Según la modalidad elegida, estas familias suelen ser una buena orientación inicial:
+                    En <b>Grado Superior</b>, los ciclos de estas familias suman <b>3 puntos extra</b> al comparar tu puntuación.
                 </div>
                 <div>{pills}</div>
             </div>
@@ -551,17 +577,19 @@ else:
     with c2:
         aprovechamiento = st.toggle("Aprovechamiento", value=False)
 
-puntuacion, detalle = calcular_puntuacion_via_a(
+puntuacion_base, detalle = calcular_puntuacion_base(
     nivel_sim=nivel_sim,
     nota_media=nota_media,
     madrid=madrid,
-    relacionada=relacionada,
     mencion=mencion,
     aprovechamiento=aprovechamiento,
 )
 
 m1, m2, m3 = st.columns(3)
-m1.metric("Puntuación estimada", f"{puntuacion} puntos")
+m1.metric(
+    "Puntuación base",
+    f"{puntuacion_base} puntos" if nivel_sim == "Grado Medio" else f"{puntuacion_base} puntos (+3 si corresponde)"
+)
 m2.metric("Nivel aplicado", nivel_sim)
 m3.metric("Comparación con cortes", "A" if nivel_sim == "Grado Medio" else "A1 / A2")
 
@@ -569,7 +597,7 @@ st.dataframe(pd.DataFrame(detalle, columns=["Criterio", "Puntos"]), use_containe
 
 extra1, extra2 = st.columns([1, 1])
 with extra1:
-    nota_max = st.number_input("Nota de corte máxima", min_value=0.0, max_value=20.0, value=20.0, step=0.1)
+    nota_max = st.number_input("Nota de corte máxima", min_value=0.0, max_value=25.0, value=25.0, step=0.1)
 with extra2:
     solo_alcanza = st.toggle("Ocultar los ciclos que no alcanza", value=False)
 
@@ -595,7 +623,12 @@ else:
     else:
         nivel_tabla = nivel
 
-    filtered = aplicar_comparacion_puntuacion(filtered, nivel_tabla, puntuacion)
+    filtered = aplicar_comparacion_puntuacion(
+        filtered,
+        nivel_tabla=nivel_tabla,
+        puntuacion_base=puntuacion_base,
+        modalidad_bach=modalidad_bach
+    )
 
     if nivel_tabla == "Grado Medio":
         filtered["orden_corte"] = filtered["via_a"].apply(to_float_safe)
@@ -618,6 +651,7 @@ else:
             "municipio",
             "tipo_centro",
             "centro",
+            "puntuacion_aplicable",
             "via_a",
             "Estado",
         ]
@@ -634,14 +668,8 @@ else:
         if solo_alcanza:
             filtered = filtered[filtered["Estado"].isin(["✅ Te alcanza", "⚠️ Parcial"])].copy()
 
-        if modalidad_bach is not None:
-            sugeridas = sugerencias_por_modalidad(modalidad_bach)
-            filtered["es_sugerido"] = filtered["familia"].isin(sugeridas)
-        else:
-            filtered["es_sugerido"] = False
-
         filtered = filtered.sort_values(
-            by=["es_sugerido", "Estado", "orden_corte", "ciclo", "centro"],
+            by=["es_relacionado", "Estado", "orden_corte", "ciclo", "centro"],
             ascending=[False, False, True, True, True],
             na_position="last"
         )
@@ -655,6 +683,9 @@ else:
                 "municipio",
                 "tipo_centro",
                 "centro",
+                "es_relacionado",
+                "bonus_modalidad",
+                "puntuacion_aplicable",
                 "via_a1",
                 "via_a2",
                 "Estado",
@@ -669,6 +700,9 @@ else:
                 "municipio",
                 "tipo_centro",
                 "centro",
+                "es_relacionado",
+                "bonus_modalidad",
+                "puntuacion_aplicable",
                 "via_a1",
                 "via_a2",
                 "Estado",
@@ -699,6 +733,9 @@ else:
             "modalidad": "Modalidad",
             "turno": "Turno",
             "bilingue": "Bilingüe",
+            "es_relacionado": "Relacionado con modalidad",
+            "bonus_modalidad": "Bonus modalidad",
+            "puntuacion_aplicable": "Puntuación aplicable",
             "via_a": "Corte A",
             "via_a1": "Corte A1",
             "via_a2": "Corte A2",
@@ -706,6 +743,7 @@ else:
         }
 
         display_df = filtered[[c for c in display_cols if c in filtered.columns]].copy()
+        display_df["es_relacionado"] = display_df["es_relacionado"].map({True: "Sí", False: "No"}) if "es_relacionado" in display_df.columns else display_df.get("es_relacionado", "")
         display_df = display_df.rename(columns=rename_map)
 
         build_aggrid(display_df)
@@ -724,19 +762,20 @@ with st.expander("Ver resumen del baremo"):
 ### Grado Medio – Vía A
 Se tiene en cuenta:
 - la **nota media**
-- si los estudios se han realizado en **Madrid o fuera**
+- **10 puntos** si el título de la **ESO** se ha obtenido en **Madrid**
 - **Mención Honorífica**
 - **Aprovechamiento**
 
 ### Grado Superior – Vía A
 Se tiene en cuenta:
 - la **nota media**
-- si la **modalidad de Bachillerato está relacionada**
-- si el Bachillerato se ha cursado en **Madrid o fuera**
+- **10 puntos** si el título se ha obtenido en **Madrid**
+- **3 puntos extra solo si el ciclo corresponde a la modalidad de Bachillerato**
 
 ### Importante
 La comparación final se hace contra los datos del Excel:
 - **Grado Medio** → **A**
 - **Grado Superior** → **A1** y **A2**
 """
+    )
     )
