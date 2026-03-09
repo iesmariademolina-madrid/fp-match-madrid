@@ -163,7 +163,6 @@ def calcular_puntuacion_via_a(
     nivel_sim,
     nota_media,
     madrid,
-    relacionada=False,
     mencion=False,
     aprovechamiento=False
 ):
@@ -187,10 +186,7 @@ def calcular_puntuacion_via_a(
         p_madrid = 10 if madrid else 0
         puntos += p_madrid
         detalle.append(("Título obtenido en Madrid", p_madrid))
-
-        p_relacionada = 3 if relacionada else 0
-        puntos += p_relacionada
-        detalle.append(("Ciclo relacionado con la modalidad de Bachillerato", p_relacionada))
+        detalle.append(("Ciclo relacionado con la modalidad de Bachillerato", "+3 por fila si corresponde"))
 
     return round(puntos, 2), detalle
 
@@ -311,9 +307,9 @@ def aplicar_comparacion_puntuacion(
     out["via_a2_num"] = out["via_a2"].apply(to_float_safe)
 
     if nivel_tabla == "Grado Medio":
-        out["puntuacion_aplicable"] = puntuacion_base
+        out["puntuacion_aplicable"] = round(float(puntuacion_base), 2)
         out["Estado"] = out["via_a_num"].apply(
-            lambda x: "✅ Te alcanza" if pd.notna(x) and puntuacion_base >= x
+            lambda x: "✅ Te alcanza" if pd.notna(x) and float(puntuacion_base) >= x
             else ("❌ No te alcanza" if pd.notna(x) else "")
         )
     else:
@@ -322,7 +318,7 @@ def aplicar_comparacion_puntuacion(
         )
         out["bonus_modalidad"] = out["es_relacionado"].apply(lambda x: 3 if x else 0)
         out["puntuacion_aplicable"] = out["bonus_modalidad"].apply(
-            lambda bonus: round(puntuacion_base + bonus, 2)
+            lambda bonus: round(float(puntuacion_base) + float(bonus), 2)
         )
 
         out["Estado A1"] = out.apply(
@@ -575,16 +571,12 @@ puntuacion, detalle = calcular_puntuacion_via_a(
     nivel_sim=nivel_sim,
     nota_media=nota_media,
     madrid=madrid,
-    relacionada=False,
     mencion=mencion,
     aprovechamiento=aprovechamiento,
 )
 
 m1, m2, m3 = st.columns(3)
-m1.metric(
-    "Puntuación estimada",
-    f"{puntuacion} puntos" if nivel_sim == "Grado Medio" else f"{puntuacion} puntos (+3 si corresponde)"
-)
+m1.metric("Puntuación base", f"{puntuacion} puntos")
 m2.metric("Nivel aplicado", nivel_sim)
 m3.metric("Comparación con cortes", "A" if nivel_sim == "Grado Medio" else "A1 / A2")
 
@@ -730,7 +722,7 @@ else:
             "bilingue": "Bilingüe",
             "es_relacionado": "Relacionado con modalidad",
             "bonus_modalidad": "Bonus modalidad",
-            "puntuacion_aplicable": "Puntuación aplicable",
+            "puntuacion_aplicable": "Puntuación final",
             "via_a": "Corte A",
             "via_a1": "Corte A1",
             "via_a2": "Corte A2",
@@ -738,8 +730,10 @@ else:
         }
 
         display_df = filtered[[c for c in display_cols if c in filtered.columns]].copy()
+
         if "es_relacionado" in display_df.columns:
             display_df["es_relacionado"] = display_df["es_relacionado"].map({True: "Sí", False: "No"})
+
         display_df = display_df.rename(columns=rename_map)
 
         build_aggrid(display_df)
