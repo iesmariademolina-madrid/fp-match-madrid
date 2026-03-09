@@ -181,7 +181,6 @@ def calcular_puntuacion_via_a(
         if aprovechamiento:
             puntos += 2
             detalle.append(("Diploma de Aprovechamiento", 2))
-
     else:
         p_madrid = 10 if madrid else 0
         puntos += p_madrid
@@ -317,8 +316,9 @@ def aplicar_comparacion_puntuacion(
             lambda fam: familia_esta_relacionada(fam, modalidad_bach)
         )
         out["bonus_modalidad"] = out["es_relacionado"].apply(lambda x: 3 if x else 0)
-        out["puntuacion_aplicable"] = out["bonus_modalidad"].apply(
-            lambda bonus: round(float(puntuacion_base) + float(bonus), 2)
+        out["puntuacion_aplicable"] = out.apply(
+            lambda row: round(float(puntuacion_base) + float(row["bonus_modalidad"]), 2),
+            axis=1
         )
 
         out["Estado A1"] = out.apply(
