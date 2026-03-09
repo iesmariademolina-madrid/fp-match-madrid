@@ -113,20 +113,10 @@ def to_float_safe(value):
 
 
 def puntos_por_nota(nota_media):
-    if nota_media >= 9:
-        return 12
-    if nota_media >= 8:
-        return 11
-    if nota_media >= 7:
-        return 10
-    if nota_media >= 6:
-        return 8
-    if nota_media >= 5:
-        return 6
-    return 0
+    return round(float(nota_media), 2)
 
 
-def familias_relacionadas_por_modalidad(modalidad):
+def sugerencias_por_modalidad(modalidad):
     modalidad_norm = normalize_scalar(modalidad)
 
     if modalidad_norm == "ciencias y tecnologia":
@@ -163,16 +153,17 @@ def familias_relacionadas_por_modalidad(modalidad):
 def familia_esta_relacionada(familia, modalidad_bach):
     if not modalidad_bach:
         return False
-    sugeridas = familias_relacionadas_por_modalidad(modalidad_bach)
+    sugeridas = sugerencias_por_modalidad(modalidad_bach)
     familia_norm = normalize_scalar(familia)
     sugeridas_norm = {normalize_scalar(x) for x in sugeridas}
     return familia_norm in sugeridas_norm
 
 
-def calcular_puntuacion_base(
+def calcular_puntuacion_via_a(
     nivel_sim,
     nota_media,
     madrid,
+    relacionada=False,
     mencion=False,
     aprovechamiento=False
 ):
@@ -196,7 +187,10 @@ def calcular_puntuacion_base(
         p_madrid = 10 if madrid else 0
         puntos += p_madrid
         detalle.append(("Título obtenido en Madrid", p_madrid))
-        detalle.append(("Ciclo relacionado con la modalidad de Bachillerato", "+3 solo si corresponde"))
+
+        p_relacionada = 3 if relacionada else 0
+        puntos += p_relacionada
+        detalle.append(("Ciclo relacionado con la modalidad de Bachillerato", p_relacionada))
 
     return round(puntos, 2), detalle
 
@@ -553,7 +547,7 @@ if nivel_sim == "Grado Superior":
         ],
     )
 
-    familias_sugeridas = familias_relacionadas_por_modalidad(modalidad_bach)
+    familias_sugeridas = sugerencias_por_modalidad(modalidad_bach)
     if familias_sugeridas:
         pills = "".join([f'<span class="pill">{fam}</span>' for fam in familias_sugeridas])
         st.markdown(
@@ -563,7 +557,7 @@ if nivel_sim == "Grado Superior":
                     Familias relacionadas con la modalidad seleccionada
                 </div>
                 <div class="small-note" style="margin-bottom:0.45rem;">
-                    En <b>Grado Superior</b>, los ciclos de estas familias suman <b>3 puntos extra</b> al comparar tu puntuación.
+                    En <b>Grado Superior</b>, los ciclos de estas familias suman <b>3 puntos extra</b>.
                 </div>
                 <div>{pills}</div>
             </div>
@@ -577,18 +571,19 @@ else:
     with c2:
         aprovechamiento = st.toggle("Aprovechamiento", value=False)
 
-puntuacion_base, detalle = calcular_puntuacion_base(
+puntuacion, detalle = calcular_puntuacion_via_a(
     nivel_sim=nivel_sim,
     nota_media=nota_media,
     madrid=madrid,
+    relacionada=False,
     mencion=mencion,
     aprovechamiento=aprovechamiento,
 )
 
 m1, m2, m3 = st.columns(3)
 m1.metric(
-    "Puntuación base",
-    f"{puntuacion_base} puntos" if nivel_sim == "Grado Medio" else f"{puntuacion_base} puntos (+3 si corresponde)"
+    "Puntuación estimada",
+    f"{puntuacion} puntos" if nivel_sim == "Grado Medio" else f"{puntuacion} puntos (+3 si corresponde)"
 )
 m2.metric("Nivel aplicado", nivel_sim)
 m3.metric("Comparación con cortes", "A" if nivel_sim == "Grado Medio" else "A1 / A2")
@@ -626,7 +621,7 @@ else:
     filtered = aplicar_comparacion_puntuacion(
         filtered,
         nivel_tabla=nivel_tabla,
-        puntuacion_base=puntuacion_base,
+        puntuacion_base=puntuacion,
         modalidad_bach=modalidad_bach
     )
 
@@ -762,14 +757,14 @@ with st.expander("Ver resumen del baremo"):
         """
 ### Grado Medio – Vía A
 Se tiene en cuenta:
-- la **nota media**
+- la **nota media real**
 - **10 puntos** si el título de la **ESO** se ha obtenido en **Madrid**
 - **Mención Honorífica**
 - **Aprovechamiento**
 
 ### Grado Superior – Vía A
 Se tiene en cuenta:
-- la **nota media**
+- la **nota media real**
 - **10 puntos** si el título se ha obtenido en **Madrid**
 - **3 puntos extra solo si el ciclo corresponde a la modalidad de Bachillerato**
 
