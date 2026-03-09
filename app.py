@@ -201,7 +201,7 @@ def calcular_puntuacion_base(
     return round(puntos, 2), detalle
 
 
-def exact_col(df: pd.DataFrame, name: str) -> str | None:
+def exact_col(df: pd.DataFrame, name: str):
     normalized = {normalize_scalar(c): c for c in df.columns}
     return normalized.get(normalize_scalar(name))
 
@@ -309,7 +309,7 @@ def aplicar_comparacion_puntuacion(
     df: pd.DataFrame,
     nivel_tabla: str,
     puntuacion_base: float,
-    modalidad_bach: str | None = None
+    modalidad_bach: str = None
 ) -> pd.DataFrame:
     out = df.copy()
     out["via_a_num"] = out["via_a"].apply(to_float_safe)
@@ -743,7 +743,8 @@ else:
         }
 
         display_df = filtered[[c for c in display_cols if c in filtered.columns]].copy()
-        display_df["es_relacionado"] = display_df["es_relacionado"].map({True: "Sí", False: "No"}) if "es_relacionado" in display_df.columns else display_df.get("es_relacionado", "")
+        if "es_relacionado" in display_df.columns:
+            display_df["es_relacionado"] = display_df["es_relacionado"].map({True: "Sí", False: "No"})
         display_df = display_df.rename(columns=rename_map)
 
         build_aggrid(display_df)
@@ -777,5 +778,4 @@ La comparación final se hace contra los datos del Excel:
 - **Grado Medio** → **A**
 - **Grado Superior** → **A1** y **A2**
 """
-    )
     )
