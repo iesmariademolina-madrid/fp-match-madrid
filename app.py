@@ -580,7 +580,11 @@ m1.metric("Puntuación base", f"{puntuacion} puntos")
 m2.metric("Nivel aplicado", nivel_sim)
 m3.metric("Comparación con cortes", "A" if nivel_sim == "Grado Medio" else "A1 / A2")
 
-st.dataframe(pd.DataFrame(detalle, columns=["Criterio", "Puntos"]), use_container_width=True, hide_index=True)
+st.dataframe(
+    pd.DataFrame(detalle, columns=["Criterio", "Puntos"]),
+    use_container_width=True,
+    hide_index=True
+)
 
 extra1, extra2 = st.columns([1, 1])
 with extra1:
@@ -642,7 +646,6 @@ else:
             "via_a",
             "Estado",
         ]
-
     else:
         filtered["a1_num"] = filtered["via_a1"].apply(to_float_safe)
         filtered["a2_num"] = filtered["via_a2"].apply(to_float_safe)
@@ -664,6 +667,7 @@ else:
         if familia != "Todas":
             display_cols = [
                 "ciclo",
+                "puntuacion_aplicable",
                 "modalidad",
                 "turno",
                 "bilingue",
@@ -672,7 +676,6 @@ else:
                 "centro",
                 "es_relacionado",
                 "bonus_modalidad",
-                "puntuacion_aplicable",
                 "via_a1",
                 "via_a2",
                 "Estado",
@@ -680,6 +683,7 @@ else:
         else:
             display_cols = [
                 "ciclo",
+                "puntuacion_aplicable",
                 "familia",
                 "modalidad",
                 "turno",
@@ -689,7 +693,6 @@ else:
                 "centro",
                 "es_relacionado",
                 "bonus_modalidad",
-                "puntuacion_aplicable",
                 "via_a1",
                 "via_a2",
                 "Estado",
@@ -760,7 +763,7 @@ Se tiene en cuenta:
 Se tiene en cuenta:
 - la **nota media real**
 - **10 puntos** si el título se ha obtenido en **Madrid**
-- **3 puntos extra solo si el ciclo corresponde a la modalidad de Bachillerato**
+- **3 puntos extra solo si el ciclo corresponde a la modalidad de Bachillerato elegida**
 
 ### Importante
 La comparación final se hace contra los datos del Excel:
